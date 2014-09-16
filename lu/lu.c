@@ -1,3 +1,5 @@
+
+#include "time.h"
 #include "bspedupack.h"
 
 #define EPS 1.0e-15
@@ -95,6 +97,9 @@ void bsplu(int M, int N, int s, int t,
         if (k%N == t) {
             /* k=kc*N+t */
             /* Search for local absolute maximum in column k of A */
+            bsp_sync();
+            printf("===\n[proc %d] kr%d nlr%d kc%d\n", bsp_pid(), kr, nlr, kc);
+            bsp_sync();
             absmax= 0.0;
             imax= -1;
             for (i = kr; i < nlr; i++) {
@@ -110,22 +115,28 @@ void bsplu(int M, int N, int s, int t,
             }
             /* Broadcast value and local index of maximum to P(*,t) */
             for(s1=0; s1 < M; s1++) {
-                bsp_put(s1+t*M,&max,Max,s*SZDBL,SZDBL);
-                bsp_put(s1+t*M,&imax,Imax,s*SZINT,SZINT);
+                printf("[proc %d] where put %d\n", bsp_pid(), s1+t*M);
+                bsp_put(s1+t*M, &max, Max, s*SZDBL, SZDBL);
+                bsp_put(s1+t*M, &imax, Imax, s*SZINT, SZINT);
             }
         }
 
         bsp_sync();
         /****** Superstep 1 ******/
-        if (k%N==t){
+        printf("[proc %d](%d,%d) Max[0]=%f Max[1]=%f\n", bsp_pid(),
+                    s,t, Max[0], Max[1]);
+        if (k%N==t) {
             /* Determine global absolute maximum (redundantly) */
             absmax = 0.0;
             for(s1=0; s1 < M; s1++) {
                 if (fabs(Max[s1]) > absmax) {
                     absmax = fabs(Max[s1]);
                     smax= s1;
+                    printf("[proc %d] hit\n", bsp_pid());
                 }
             }
+
+            printf("[proc %d] absmax %f\n", bsp_pid(), absmax);
             if (absmax > EPS) {
                 r = Imax[smax]*M+smax; /* global index of pivot row */
                 pivot = Max[smax];
@@ -137,7 +148,9 @@ void bsplu(int M, int N, int s, int t,
                 for(t1=0; t1<N; t1++)
                     bsp_put(s+t1*M,&r,&r,0,SZINT);
             } else {
-                bsp_abort("bsplu at stage %d: matrix is singular\n",k);
+                bsp_abort("[proc %d] bsplu at stage %d: matrix is singular\n",
+                          bsp_pid(),
+                          k);
             }
         }
 
@@ -151,7 +164,7 @@ void bsplu(int M, int N, int s, int t,
             /* Store row k of A in row r on P(r%M,t) */
             bsp_put(r%M + t*M, a[k/M], pa, (r/M)*nlc*SZDBL, nlc*SZDBL);
         }
-        if (r%M==s){
+        if (r%M==s) {
             if (t==0)
                 bsp_put(k%M, &pi[r/M], pi, (k/M)*SZINT, SZINT);
 
@@ -200,16 +213,71 @@ void bsplu(int M, int N, int s, int t,
 
 
 int run_lu() {
+    int s, t, procAmount, currProc, n, N, M, i, j;
+    double** data;
+    double value = 1.0;
+    int* pi;
     bsp_begin(P);
-    p = bsp_nprocs(); /* p = number of processors obtained */
-    s = bsp_pid();
+    procAmount = bsp_nprocs(); /* p = number of processors obtained */
+    currProc = bsp_pid();
 
+    if(4 != procAmount)
+        bsp_abort("wrong proc amount\n");
+
+    M = 2;
+    N = 2;
+
+    s = 1 == ((currProc >> 1) & 0b1);
+    t = 1 == (currProc & 0b1);
+
+    n = 10;
+    data = matallocd(n,n);bsp_push_reg(data, SZDBL*n*n);
+
+    pi = vecalloci(n);
+    if(0 == currProc) {
+        for (i = 0; i < n; ++i) {
+            pi[i] = i;
+            for (j = 0; j < n; ++j) {
+                data[i][j] = ((float)rand()/(float)(RAND_MAX)) * 5;
+                //value += 0.5;
+                printf("%f", data[i][j]);
+                if(n-1 != j)
+                    printf(", ");
+            }
+            //value += i*1.42;
+            //value += 2.00123;
+            printf("\n");
+        }
+    }
+    bsp_sync();
+    if( 0 == currProc) {
+        for(i = 1; i < procAmount; ++i) {
+                bsp_put(i, data, data, 0, SZDBL*n*n);
+        }
+    }
+    //bsp_sync();
+    //if(2 == currProc) {
+    //    printf("==========\n");
+    //    for(i = 0; i < n; ++i) {
+    //        for(j = 0; j < n; ++j) 
+    //            printf("%f ", data[i][j]);
+    //        printf("\n");
+    //    }
+    //}
+    bsp_sync();
+
+    bsplu(M, N, s, t, n, pi, data);
+    
+    bsp_pop_reg(data); matfreed(data);
+    vecfreei(pi);
     bsp_end();
 };
 
-int main(int argc, char **argv){
+int main(int argc, char **argv) {
     bsp_init(run_lu, argc, argv);
+
     /* sequential part */
+    srand((unsigned int)time(NULL));
     printf("How many processors do you want to use?\n");
     fflush(stdout);
     scanf("%d",&P);
