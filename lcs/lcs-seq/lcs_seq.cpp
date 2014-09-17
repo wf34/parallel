@@ -50,8 +50,8 @@ LeastCommonSubSequence::LeastCommonSubSequence(int l)
         L_[i] = new int[length_+1];
         memset(L_[i], 0, (length_+1) * sizeof(int));
     }
-    std::cout << "A [" << a_ << "]" << std::endl
-              << "B [" << b_ << "]" << std::endl;
+    //std::cout << "A [" << a_ << "]" << std::endl
+    //          << "B [" << b_ << "]" << std::endl;
 }
 
 LeastCommonSubSequence::LeastCommonSubSequence(const char* a,
@@ -94,23 +94,23 @@ LeastCommonSubSequence::process() {
             for(int j = 1; j <= length_; ++j) {
                 if(a_[i-1] == b_[j-1]) {
                     L_[i][j] = L_[i-1][j-1] + 1;             
-                    std::cout << "("<< i << ", " << j << ") Symbol "
-                        << a_[i-1] << std::endl;
+                    //std::cout << "("<< i << ", " << j << ") Symbol "
+                    //          << a_[i-1] << std::endl;
                 } else {
                     L_[i][j] = std::max<int>(L_[i-1][j],
                                              L_[i][j-1]);
                 }
             }
         }
-        std::cout << std::endl;
-        for(int i = 0; i < length_+1; ++i) {
-           for(int j = 0; j < length_+1; ++j) {
-                std::cout << L_[i][j] << " ";
-           }
-           std::cout << std::endl;
-        }
-           std::cout << std::endl
-                  << "Length : " << L_[length_][length_] << std::endl;
+        //std::cout << std::endl;
+        //for(int i = 0; i < length_+1; ++i) {
+        //   for(int j = 0; j < length_+1; ++j) {
+        //        std::cout << L_[i][j] << " ";
+        //   }
+        //   std::cout << std::endl;
+        //}
+        //   std::cout << std::endl
+        //          << "Length : " << L_[length_][length_] << std::endl;
     }
     double tEnd = bsp_time();
     std::cout << "Problem size [" << length_ << "]" << std::endl

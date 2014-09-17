@@ -8,6 +8,6 @@ set(MCBSP_INCDIR "${MCBSP_DIR}/include")
 
 include_directories("${MCBSP_INCDIR}")
 
-add_executable("${PRJ}" "${PROJECT_SOURCE_DIR}/lcs.cpp")
+add_executable("${PRJ}" "${PROJECT_SOURCE_DIR}/lcs_seq.cpp")
 target_link_libraries("${PRJ}" "${MCBSP_LIBDIR}/libmcbsp1.2.0.a"
                                 pthread rt)
