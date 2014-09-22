@@ -7,6 +7,7 @@
 #include <utility>
 #include <cmath>
 #include <cassert> 
+#include <vector>
 
 extern "C" {
 #include "mcbsp.h"
@@ -21,12 +22,16 @@ class DLeastCommonSubSequence {
         typedef std::map<CoordsPair, int**> ChunkMap;
         typedef ChunkMap::const_iterator ChunkMapCIter;
         typedef ChunkMap::iterator ChunkMapIter;
+        
+        typedef std::vector<int> Column;
+        typedef std::map<CoordsPair, Column> ColumnMap;
+        typedef ColumnMap::iterator ColumnMapIter;
 
         DLeastCommonSubSequence(int l);
         ~DLeastCommonSubSequence();
         void process();
         CoordsPair getCPair(int i, int j) {
-            return std::make_pair<int,int>(i,j);
+            return std::make_pair(i,j);
         }
 
     private:
@@ -58,7 +63,10 @@ class DLeastCommonSubSequence {
         //int procStride_;
         int chunkPerProc_;
 
-        ChunkMap L_; //
+        ChunkMap L_;
+        ColumnMap lastCols_; // this map stores last column for every chunk
+                             // owned by this processor
+                          
         int length_; // but  length == full problem size
         static const char* alphabet_;
     public:
@@ -121,10 +129,34 @@ DLeastCommonSubSequence::distributedInit() {
         for(int j = 0; j < chunkStride_; ++j) {
             if(id_ != j % n_)
                 continue;
+            // allocate L 
             L_[getCPair(i,j)] = new int*[G];
             for(int k = 0; k < G; ++k) {
                 L_[getCPair(i,j)][k] = new int [G];
                 memset(L_[getCPair(i,j)][k], 0, G*sizeof(int));
+            }
+
+            //allocate chunks for lastColumn
+            if(j > 0) {
+                L_[getCPair(i,j-1)] = new int*[G];
+                for(int k = 0; k < G; ++k) {
+                    L_[getCPair(i,j-1)][k] = new int [G];
+                    memset(L_[getCPair(i,j-1)][k], 0, G*sizeof(int));
+                }
+            }
+
+            // allocate lastColumn
+            Column currChunkCol;
+            currChunkCol.resize(chunkLength_);
+            lastCols_[getCPair(i,j)] = currChunkCol;
+            bsp_push_reg( lastCols_[getCPair(i,j)].data(),
+                          sizeof(int)*chunkLength_ );
+            if(j > 0) {
+                Column currChunkCol;
+                currChunkCol.resize(chunkLength_);
+                lastCols_[getCPair(i,j-1)] = currChunkCol;
+                bsp_push_reg( lastCols_[getCPair(i,j-1)].data(),
+                              sizeof(int)*chunkLength_ );
             }
         }
     }
@@ -213,6 +245,13 @@ DLeastCommonSubSequence::retrieveLastColInBlock(int i,
                                                 int j) {
     // row prev block getting             _|_|
     // col prev block locally colocated  |_|X|
+    std::cout << "dst " << id_ << " with cell ["<< i <<","<< j+1
+              << "], getting from " << j%n_ << " with cell ["
+              << i <<","<< j
+              << "]"<< std::endl << std::flush;
+    bsp_get(j % n_, lastCols_[getCPair(i,j)].data(), 0,
+            lastCols_[getCPair(i,j+1)].data(), sizeof(int)*chunkLength_);
+    bsp_sync();
 }
 
 int
@@ -240,6 +279,16 @@ DLeastCommonSubSequence::setLElem(int gi,
 void
 DLeastCommonSubSequence::calculateChunk(int i,
                                         int j) {
+    // on previous steps column was retrieved from adjacent proc,
+    // now put this data to the L
+    if(j > 0) {
+        int lPrev = j*G - 1;
+        for(int iPrev = i*G; iPrev < (i+1)*G; ++iPrev) {
+            setLElem(iPrev, lPrev,
+                     lastCols_[getCPair(i,j-1)][iPrev-i*G]);
+        }
+    }
+
     for(int k = i*G; k < (i+1)*G; ++k) {
         for(int l = j*G; l < (j+1)*G; ++l) {
             if( 0 == k ||
@@ -257,6 +306,14 @@ DLeastCommonSubSequence::calculateChunk(int i,
             }
         }
     }
+
+    // fill respective entry of lastCols_
+    // put there last col of current chunk
+    int** chunk = L_[getCPair(i,j)];
+    assert(nullptr != chunk);
+    for(int k = 0; k < chunkLength_; ++k)
+        lastCols_[getCPair(i,j)][k] =
+            chunk[k][chunkLength_-1];
 }
 
 
@@ -268,20 +325,29 @@ DLeastCommonSubSequence::process() {
             bsp_sync();
             if(0 == id_)
                 std::cout << "Wavefront " << a << std::endl;
-            bsp_sync();
 
+            bsp_sync();
+            // communicate cols
+            for(int i = 0; i < chunkStride_; ++i) {
+                for(int j = 0; j < chunkStride_; ++j) {
+                    if( a == i + j &&
+                        id_ == j % n_ &&
+                        0 != j )
+                        retrieveLastColInBlock(i, j-1);
+                }
+            }
+
+            bsp_sync();
+            // calculate
             for(int i = 0; i < chunkStride_; ++i) {
                 for(int j = 0; j < chunkStride_; ++j) {
                     if( a == i + j &&
                         id_ == j % n_) {
-                        std::cout << "Chunk[" << i << ", " << j
-                                  << "] held by proc " << id_ << std::endl;
-                        
-                        if(0 != i)
-                            retrieveLastColInBlock(i-1, j);
+                        std::cout << "calculateChunk[" << i << ", " 
+                                  << j << "] held by proc " << id_
+                                  << std::endl << std::flush;
                         calculateChunk(i, j);
                         std::cout << "thats all\n";
-                        
                     }
                     bsp_sync();
                 }
@@ -289,11 +355,13 @@ DLeastCommonSubSequence::process() {
             bsp_sync();
             if(0 == id_) {
                 std::cout << "================\n";
-                bsp_abort("Enough");
             }
             bsp_sync();
         }
 
+        for(ColumnMapIter it = lastCols_.begin();
+            it != lastCols_.end(); ++it)
+            bsp_pop_reg(it->second.data());
         //for(int i = 1; i <= length_; ++i) {
         //    for(int j = 1; j <= length_; ++j) {
         //        if(a_[i-1] == b_[j-1]) {

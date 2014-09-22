@@ -2,6 +2,8 @@ set(PRJ "lcs-bsp")
 project("${PRJ}")
 cmake_minimum_required(VERSION 2.8)
 
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+
 set(COMMON_DIR "${PROJECT_SOURCE_DIR}/../../common")
 set(MCBSP_DIR "${PROJECT_SOURCE_DIR}/../../MulticoreBSP-for-C")
 set(MCBSP_LIBDIR "${MCBSP_DIR}/lib")

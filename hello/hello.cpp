@@ -22,8 +22,8 @@ void spmd() {
     bsp_sync();
     // getting values of even into odd
     if(1 == bsp_pid() % 2) {
-        bsp_get(bsp_pid()-1, a.data(), 0,
-                a.data(), 3*sizeof(unsigned int));
+        bsp_get(bsp_pid() - 1, a.data(), 0,
+                a.data(), 3 * sizeof(unsigned int));
     }
     
     bsp_sync();
