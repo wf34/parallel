@@ -2,6 +2,8 @@ set(PRJ "helloBsp")
 project("${PRJ}")
 cmake_minimum_required(VERSION 2.8)
 
+SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+
 include_directories("${PROJECT_SOURCE_DIR}/../MulticoreBSP-for-C")
 #link_directories("${PROJECT_SOURCE_DIR}/../MulticoreBSP-for-C/lib")
 add_executable("${PRJ}" "${PROJECT_SOURCE_DIR}/hello.cpp")
