@@ -5,6 +5,8 @@
 #include <time.h>
 #include <map>
 #include <utility>
+#include <cmath>
+#include <cassert> 
 
 extern "C" {
 #include "mcbsp.h"
@@ -30,20 +32,31 @@ class DLeastCommonSubSequence {
     private:
         void distributedInit();
         void debugL();
+        void retrieveLastColInBlock(int i, int j);
+        void calculateChunk(int i, int j);
+
+        int getLocal(int gIndex);  // convert global index [0..length]
+                                   // to local [0..chunkLength]
+
+        int getLElem(int i, int j);// given global indexes of L entry
+                                   // get actual entry value
+        void setLElem(int i, int j, int value);
 
         int n_;
         int id_;
 
-        int s_, t_; // P(s, t) 2D processor naming s, t in [0, n-1]
+        // int s_, t_; // P(s, t) 2D processor naming s, t in [0, n-1]
 
         char* a_; // for distributed implementation
         char* b_; // these variables holds only repective pieces of whole string
-        int chunkPerProc_;
+        
         int chunkLength_; // length of abovementioned pieces
         int chunkStride_; /*     _ _  _
                                 |_|_|  | <- this is
                                 |_|_| _|    stride measured in chunks 2
                           */
+        //int procStride_;
+        int chunkPerProc_;
 
         ChunkMap L_; //
         int length_; // but  length == full problem size
@@ -90,10 +103,11 @@ DLeastCommonSubSequence::distributedInit() {
     n_ = bsp_nprocs();
     chunkLength_ = G;
     
-    s_ = 1 == ((id_ >> 1) & 0b1);
-    t_ = 1 == (id_ & 0b1);
+    //s_ = 1 == ((id_ >> 1) & 0b1);
+    //t_ = 1 == (id_ & 0b1);
     
     chunkStride_ = length_ / G;
+    //procStride_ = sqrt(n_);
     chunkPerProc_ = chunkStride_ / n_;
     a_ = new char[length_ / n_];
     b_ = new char[length_ / n_];
@@ -105,8 +119,7 @@ DLeastCommonSubSequence::distributedInit() {
 
     for(int i = 0; i < chunkStride_; ++i) {
         for(int j = 0; j < chunkStride_; ++j) {
-            if(s_ != i % n_ ||
-               t_ != j % n_)
+            if(id_ != j % n_)
                 continue;
             L_[getCPair(i,j)] = new int*[G];
             for(int k = 0; k < G; ++k) {
@@ -146,19 +159,25 @@ DLeastCommonSubSequence::distributedInit() {
 
 void
 DLeastCommonSubSequence::debugL() {
-    //debug section
+    // debug section
     //bsp_sync();
     //for(int i = 0; i < chunkStride_; ++i) {
     //    for(int j = 0; j < chunkStride_; ++j) {
-    //        if( s_ == i % n_ &&
-    //            t_ == j % n_ ) {
+    //        //if(0 == id_)
+    //        //    std::cout<< "Chunk {" << i << ", " << j << "}" << std::endl <<
+    //        //                "would be handled by proc (" <<
+    //        //                i % procStride_ << ", " <<
+    //        //                j % procStride_ << ")"<< std::endl;
+    //        if( s_ == i % procStride_ &&
+    //            t_ == j % procStride_ ) {
     //            std::cout << "Proc " << id_ << "(" << s_ << ", " <<  t_ 
     //                      << ") holds " << i << " " << j << std::endl;
     //        }
     //        bsp_sync();
     //    }
     //}
-    //bsp_abort("stop for a while ");
+    //bsp_sync();
+    //bsp_abort("stop for a while\n");
     //bsp_sync();
     //std::cout << std::endl;
     //for(int i = 0; i < chunkStride_; ++i) {
@@ -182,10 +201,99 @@ DLeastCommonSubSequence::debugL() {
     //bsp_sync();
 }
 
+
+int
+DLeastCommonSubSequence::getLocal(int i) {
+    return ((i/G)/n_)*G + i%G;
+}
+
+
+void
+DLeastCommonSubSequence::retrieveLastColInBlock(int i,
+                                                int j) {
+    // row prev block getting             _|_|
+    // col prev block locally colocated  |_|X|
+}
+
+int
+DLeastCommonSubSequence::getLElem(int gi,
+                                  int gj) {
+    int** chunk = L_[getCPair(gi / chunkStride_, gj / chunkStride_)];
+    assert(NULL != chunk);
+    return chunk[getLocal(gi)][getLocal(gj)];
+}
+
+
+void
+DLeastCommonSubSequence::setLElem(int gi,
+                                  int gj,
+                                  int value) {
+    int** chunk = L_[getCPair(gi / chunkStride_, gj / chunkStride_)];
+    //std::cout << "gi="<<gi << " gj="<<gj << " And chunk is ["
+    //          << gi / chunkStride_ << ", "
+    //          << gj / chunkStride_  << "]"
+    //          << " And val=" << value <<std::endl <<std::flush;
+    assert(NULL != chunk);
+    chunk[getLocal(gi)][getLocal(gj)] = value;
+}
+
+void
+DLeastCommonSubSequence::calculateChunk(int i,
+                                        int j) {
+    for(int k = i*G; k < (i+1)*G; ++k) {
+        for(int l = j*G; l < (j+1)*G; ++l) {
+            if( 0 == k ||
+                0 == l ) {
+                setLElem(k, l, 0);
+            } else {
+                char iSymbol = a_[getLocal(k)];
+                char jSymbol = b_[getLocal(l)];
+                if(iSymbol == jSymbol) {
+                    setLElem(k,l, getLElem(k-1, l-1) + 1);
+                } else {
+                    setLElem(k, l, std::max<int>(getLElem(k-1, l),
+                                                 getLElem(k, l-1)));
+                }
+            }
+        }
+    }
+}
+
+
 void
 DLeastCommonSubSequence::process() {
     double tStart = bsp_time();
     {
+        for(int a = 0; a < 2*chunkStride_-1; ++a) {
+            bsp_sync();
+            if(0 == id_)
+                std::cout << "Wavefront " << a << std::endl;
+            bsp_sync();
+
+            for(int i = 0; i < chunkStride_; ++i) {
+                for(int j = 0; j < chunkStride_; ++j) {
+                    if( a == i + j &&
+                        id_ == j % n_) {
+                        std::cout << "Chunk[" << i << ", " << j
+                                  << "] held by proc " << id_ << std::endl;
+                        
+                        if(0 != i)
+                            retrieveLastColInBlock(i-1, j);
+                        calculateChunk(i, j);
+                        std::cout << "thats all\n";
+                        
+                    }
+                    bsp_sync();
+                }
+            }
+            bsp_sync();
+            if(0 == id_) {
+                std::cout << "================\n";
+                bsp_abort("Enough");
+            }
+            bsp_sync();
+        }
+
         //for(int i = 1; i <= length_; ++i) {
         //    for(int j = 1; j <= length_; ++j) {
         //        if(a_[i-1] == b_[j-1]) {
