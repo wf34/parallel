@@ -114,7 +114,9 @@ LeastCommonSubSequence::process() {
     }
     double tEnd = bsp_time();
     std::cout << "Problem size [" << length_ << "]" << std::endl
-              << "Time = " << tEnd - tStart << std::endl;
+              << "Time = " << tEnd - tStart << std::endl
+              << "Result, though is " << L_[length_-1][length_-1]
+              << std::endl;
 }
 
 
@@ -130,7 +132,8 @@ void run() {
     if(problemSize)
         LeastCommonSubSequence(problemSize).process();
     else
-        LeastCommonSubSequence("kilimanjaro", "montegengro").process();
+        LeastCommonSubSequence("mihmmjgfgmoaemcj",
+                                "akngjmjfdnmhiihd").process();
         //LeastCommonSubSequence("design", "define").process();
     bsp_end();
 }

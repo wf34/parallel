@@ -84,8 +84,9 @@ const int
 DLeastCommonSubSequence::G = 4;
 const char*
 DLeastCommonSubSequence::alphabet_ =
-        "0123456789"
-        "abcdefghijklmnopqrstuvwxyz";
+        //"0123456789"
+        "abcdefghijklmno";
+        //"abcdefghijklmnopqrstuvwxyz";
 const int
 DLeastCommonSubSequence::procAmount_ = 4;
 
@@ -133,7 +134,7 @@ DLeastCommonSubSequence::distributedInit() {
     
 
     // allocate storage for rows before
-    int rowsToExportPerProc = 0 == chunkStride_/n_ ? chunkStride_/n_ :
+    int rowsToExportPerProc = (0 == chunkStride_%n_) ? chunkStride_/n_ :
                                                      chunkStride_/n_+1;  
     std::cout << "rowsToExportPerProc "
               << rowsToExportPerProc << std::endl;
@@ -263,7 +264,7 @@ DLeastCommonSubSequence::debugL() {
 
 int
 DLeastCommonSubSequence::getLocal(int i) {
-    return ((i/G)/n_)*G + i%G;
+    return i%G;
 }
 
 
@@ -271,12 +272,12 @@ void
 DLeastCommonSubSequence::sendLastRowInBlock(int sendTo,
                                             int srcI, int srcJ,
                                             int dstI, int dstJ) {
-    std::cout << "dstPROC {" << sendTo << "} with cell ["<< dstI <<","<< dstJ
-              << "], source - from PROC {" << id_ << "} with cell ["
-              << srcI <<","<< srcJ
-              << "]" << std::endl << std::flush;
-    std::cout << "src ptr " << L_[getCPair(srcI, srcJ)][G-1] << std::endl;
-    std::cout << "dst ptr " << L_[getCPair(dstI, dstJ)][G-1] << std::endl;
+    //std::cout << "dstPROC {" << sendTo << "} with cell ["<< dstI <<","<< dstJ
+    //          << "], source - from PROC {" << id_ << "} with cell ["
+    //          << srcI <<","<< srcJ
+    //          << "]" << std::endl << std::flush;
+    //std::cout << "src ptr " << L_[getCPair(srcI, srcJ)][G-1] << std::endl;
+    //std::cout << "dst ptr " << L_[getCPair(dstI, dstJ)][G-1] << std::endl;
     bsp_put(sendTo, L_[getCPair(srcI, srcJ)][G-1],
                     L_[getCPair(dstI, dstJ)][G-1], 0, G*sizeof(int));
 }
@@ -288,12 +289,13 @@ DLeastCommonSubSequence::retrieveLastRowInBlock(int srcI, int srcJ,
     //                     yep, this guy -> v
     // col prev block getting             _|_|
     // row prev block locally colocated  |_|X|
-    std::cout << "dstPROC {" << id_ << "} with cell ["<< dstI <<","<< dstJ
-              << "], getting from PROC {" << srcI%n_ << "} with cell ["
-              << srcI <<","<< srcJ
-              << "]" << std::endl << std::flush;
-    std::cout << "src ptr " << L_[getCPair(srcI, srcJ)][G-1] << std::endl;
-    std::cout << "dst ptr " << L_[getCPair(dstI, dstJ)][G-1] << std::endl;
+    
+    //std::cout << "dstPROC {" << id_ << "} with cell ["<< dstI <<","<< dstJ
+    //          << "], getting from PROC {" << srcI%n_ << "} with cell ["
+    //          << srcI <<","<< srcJ
+    //          << "]" << std::endl << std::flush;
+    //std::cout << "src ptr " << L_[getCPair(srcI, srcJ)][G-1] << std::endl;
+    //std::cout << "dst ptr " << L_[getCPair(dstI, dstJ)][G-1] << std::endl;
 
     bsp_get(srcI % n_, L_[getCPair(srcI, srcJ)][G-1], 0,
             L_[getCPair(dstI, dstJ)][G-1], sizeof(int)*chunkLength_);
@@ -303,8 +305,9 @@ DLeastCommonSubSequence::retrieveLastRowInBlock(int srcI, int srcJ,
 int
 DLeastCommonSubSequence::getLElem(int gi,
                                   int gj) {
-    int** chunk = L_[getCPair(gi / chunkStride_, gj / chunkStride_)];
+    int** chunk = L_[getCPair(gi / chunkLength_, gj / chunkLength_)];
     assert(NULL != chunk);
+    assert(NULL != chunk[getLocal(gi)]);
     return chunk[getLocal(gi)][getLocal(gj)];
 }
 
@@ -313,12 +316,14 @@ void
 DLeastCommonSubSequence::setLElem(int gi,
                                   int gj,
                                   int value) {
-    int** chunk = L_[getCPair(gi / chunkStride_, gj / chunkStride_)];
-    //std::cout << "gi="<<gi << " gj="<<gj << " And chunk is ["
-    //          << gi / chunkStride_ << ", "
-    //          << gj / chunkStride_  << "]"
-    //          << " And val=" << value <<std::endl <<std::flush;
+    int** chunk = L_[getCPair(gi / chunkLength_, gj / chunkLength_)];
+    //std::cout << "gi="<< gi << " gj="<<gj << " And chunk is ["
+    //          << gi / chunkLength_ << ", "
+    //          << gj / chunkLength_  << "] with local coords {"
+    //          << getLocal(gi) << ", "
+    //          << getLocal(gj) << "} And val=" << value <<std::endl <<std::flush;
     assert(NULL != chunk);
+    assert(NULL != chunk[getLocal(gi)]);
     chunk[getLocal(gi)][getLocal(gj)] = value;
 }
 
@@ -441,9 +446,9 @@ DLeastCommonSubSequence::process() {
                 for(int j = 0; j < chunkStride_; ++j) {
                     if( a == i + j &&
                         id_ == i % n_) {
-                        std::cout << "calculateChunk[" << i << ", " 
-                                  << j << "] held by proc " << id_
-                                  << std::endl << std::flush;
+                        //std::cout << "calculateChunk[" << i << ", " 
+                        //          << j << "] held by proc " << id_
+                        //          << std::endl << std::flush;
                         calculateChunk(i, j);
                         //// we will be reading from here at next wavefront
                         //bsp_push_reg(L_[getCPair(i,j)][G-1],
@@ -453,7 +458,7 @@ DLeastCommonSubSequence::process() {
                 }
 
             }
-            
+
             // communicate rows 
             indexInOver = 0;
             for(int i = 0; i < chunkStride_; ++i) {
@@ -461,16 +466,16 @@ DLeastCommonSubSequence::process() {
                     if( a == i + j &&
                         id_ == i % n_ &&
                         chunkStride_-1 != i ) {
-                        //sendLastRowInBlock(i+1%n_, i, j, i, j);
-                        std::cout << "dstPROC {" << i+1%n_ << "} with index ["<<
-              indexInOver << "], source - from PROC {" << id_ << "} with cell ["
-              << i <<","<< j 
-              << "]" << std::endl << std::flush;
-             std::cout << "src ptr " << L_[getCPair(i, j)][G-1] << std::endl
-                 << std::flush;
-             std::cout << "dst ptr " << over_[indexInOver].data() << std::endl
-                 << std::flush;
-                        bsp_put(i+1%n_,
+                        //std::cout << "dstPROC {" << (i+1)%n_ << "} with index ["
+                        //          << indexInOver << "], source - from PROC {"
+                        //          << id_ << "} with cell ["
+                        //          << i <<","<< j 
+                        //          << "]" << std::endl << std::flush;
+                        //std::cout << "src ptr " << L_[getCPair(i, j)][G-1]
+                        //          << std::endl << std::flush;
+                        //std::cout << "dst ptr " << over_[indexInOver].data()
+                        //          << std::endl << std::flush;
+                        bsp_put((i+1)%n_,
                                 L_[getCPair(i, j)][G-1],
                                 over_[indexInOver].data(),
                                 0, G*sizeof(int));
