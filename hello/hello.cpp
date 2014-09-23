@@ -1,6 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
-
+#include <string.h>
 #include <vector>
 #include <map>
 #include <iostream>
@@ -9,9 +9,71 @@ extern "C" {
 #include "include/mcbsp.h"
 }
 
+
+void withPut() {
+    bsp_begin( 4 );
+    std::map<char, int*> m;
+    for(int i = 0; i < 4; ++i) {
+        if(i == bsp_pid()) {
+            // Init
+            m['m'] = new int[3];
+            memset(m['m'], 0, sizeof(int)*3);
+            m['s'] = new int[3];
+            memset(m['s'], 0, sizeof(int)*3);
+
+            if(0 == bsp_pid() % 2) {
+                m['s'][0] = bsp_pid()*5+1;
+                m['s'][1] = bsp_pid()*10+1;
+                m['s'][2] = bsp_pid()*15+1;
+                //std::cout << "proc " << bsp_pid() << " unregistered "
+                //          << m['m'] << std::endl << std::flush;
+            }
+            if(1 == bsp_pid() % 2) {
+                std::cout << "proc " << bsp_pid() << " registering "
+                          << m['s'] << std::endl << std::flush;
+                bsp_push_reg(m['s'], 3*sizeof(int));
+            }
+        }
+        bsp_sync();
+    }
+
+    bsp_sync();
+    for(int i = 0; i < 4; ++i) {
+        if(i == bsp_pid()) {
+            if(0 == i % 2) {
+                std::cout << "proc " << bsp_pid() << " puts to proc "
+                         << bsp_pid() + 1 << "data from " << m['s']
+                         << " to " << m['s']
+                         << std::endl << std::flush;
+                bsp_put(bsp_pid() + 1,
+                        m['s'], 
+                        m['s'], 0, 3 * sizeof(int));
+            }
+        }
+        bsp_sync();
+    }
+    
+    bsp_sync();
+    // print values
+    for(int i = 0; i < 4; ++i) {
+        if(i == bsp_pid()) {
+            bsp_pop_reg(m['s']);
+            std::cout << "Proc {" << bsp_pid() << "} contains"
+                      << std::endl << std::flush;
+            for(int i = 0; i < 3; ++i)
+                std::cout << m['s'][i] << " "; 
+            std::cout << std::endl << std::flush;
+        }
+        bsp_sync();
+    }
+    bsp_end();
+}
+
+
 void withMaps() {
     bsp_begin( 4 );
-    /// Init
+    // Init
+    std::map<char, int*> n;
     std::map<char, std::vector<unsigned int> > m;
     std::vector<unsigned int> a;
     a.resize(3);
@@ -33,6 +95,7 @@ void withMaps() {
     // print values
     for(int i = 0; i < 4; ++i) {
         if(i == bsp_pid()) {
+            std::cout << "Test " << n['n'] <<std::endl;
             std::cout << "Proc {" << bsp_pid() << "} contains"
                       << std::endl << std::flush;
             for(std::vector<unsigned int>::const_iterator it = m['m'].cbegin();
@@ -83,7 +146,7 @@ void spmd() {
 }
 
 int main( int argc, char ** argv ) {
-    bsp_init( &withMaps, argc, argv );
-    spmd();
+    bsp_init( &withPut, argc, argv );
+    withPut();
     return EXIT_SUCCESS;
 }

@@ -35,6 +35,9 @@ class DLeastCommonSubSequence {
         void debugL();
         void retrieveLastRowInBlock(int srcI, int srcJ,  // represented here
                                     int dstI, int dstJ); // indeces count chunks
+        void sendLastRowInBlock(int sendTo,
+                                int srcI, int srcJ,
+                                int dstI, int dstJ);
         void calculateChunk(int i, int j);
 
         int getLocal(int gIndex);  // convert global index [0..length]
@@ -129,7 +132,7 @@ DLeastCommonSubSequence::distributedInit() {
                 L_[getCPair(i,j)][k] = new int [G];
                 memset(L_[getCPair(i,j)][k], 0, G*sizeof(int));
                 if(G-1 == k) {
-                    bsp_push_reg(L_[getCPair(i,j)][k], G*sizeof(int));
+                    //bsp_push_reg(L_[getCPair(i,j)][k], G*sizeof(int));
                     std::cout << "Proc " << id_ << 
                             " Last Row in chunk [" << i << ", " <<
                             j << "] addr: ";
@@ -143,16 +146,18 @@ DLeastCommonSubSequence::distributedInit() {
                 L_[getCPair(i-1,j)] = new int*[G];
                 for(int k = 0; k < G; ++k) {
                     if(k < G-1) {
-                        L_[getCPair(i-1,j)][k] = nullptr;
+                        L_[getCPair(i-1,j)][k] = NULL;
                     } else {
                         L_[getCPair(i-1,j)][k] = new int[G];
                         memset(L_[getCPair(i-1,j)][k], 0, G*sizeof(int));
-                        bsp_push_reg(L_[getCPair(i-1,j)][k], G*sizeof(int));
                         std::cout << "Proc " << id_ << 
-                                  " Last Row in chunk [" << i-1 << ", " <<
-                                  j << "] addr: ";
+                            " Last Row in chunk ["
+                            << i-1 << ", " <<
+                            j << "] (which have only last row) addr: ";
                         std::cout << L_[getCPair(i-1,j)][k]
-                                  << std::endl << std::flush;
+                            << std::endl << std::flush;
+                        //bsp_push_reg(L_[getCPair(i-1,j)][k], G*sizeof(int));
+                        
                     }
                 }
             }
@@ -238,6 +243,21 @@ DLeastCommonSubSequence::getLocal(int i) {
 }
 
 
+void 
+DLeastCommonSubSequence::sendLastRowInBlock(int sendTo,
+                                            int srcI, int srcJ,
+                                            int dstI, int dstJ) {
+    std::cout << "dstPROC {" << sendTo << "} with cell ["<< dstI <<","<< dstJ
+              << "], source - from PROC {" << id_ << "} with cell ["
+              << srcI <<","<< srcJ
+              << "]" << std::endl << std::flush;
+    std::cout << "src ptr " << L_[getCPair(srcI, srcJ)][G-1] << std::endl;
+    std::cout << "dst ptr " << L_[getCPair(dstI, dstJ)][G-1] << std::endl;
+    bsp_put(sendTo, L_[getCPair(srcI, srcJ)][G-1],
+                    L_[getCPair(dstI, dstJ)][G-1], 0, G*sizeof(int));
+}
+
+
 void
 DLeastCommonSubSequence::retrieveLastRowInBlock(int srcI, int srcJ,
                                                 int dstI, int dstJ) {
@@ -252,7 +272,7 @@ DLeastCommonSubSequence::retrieveLastRowInBlock(int srcI, int srcJ,
     std::cout << "dst ptr " << L_[getCPair(dstI, dstJ)][G-1] << std::endl;
 
     bsp_get(srcI % n_, L_[getCPair(srcI, srcJ)][G-1], 0,
-            L_[getCPair(dstI,dstJ)][G-1], sizeof(int)*chunkLength_);
+            L_[getCPair(dstI, dstJ)][G-1], sizeof(int)*chunkLength_);
     bsp_sync();
 }
 
@@ -304,8 +324,10 @@ DLeastCommonSubSequence::calculateChunk(int i,
 void
 DLeastCommonSubSequence::process() {
     for(int i = 0; i < n_; ++i) {
-        if(id_ == i)
+        if(id_ == i) {
+            std::cout << "Proc {" << i << "}\n" << std::flush;
             distributedInit();
+        }
         bsp_sync();
     }
     double tStart = bsp_time();
@@ -314,16 +336,58 @@ DLeastCommonSubSequence::process() {
             bsp_sync();
             if(0 == id_)
                 std::cout << "Wavefront " << a << std::endl << std::flush;
+            
+            bsp_sync();
+            for(int p = 0; p < 4; ++p) {
+                if(p == id_) {
+                    //pop destinations
+                    for(int i = 0; i < chunkStride_; ++i) {
+                        for(int j = 0; j < chunkStride_; ++j) {
+                            if(a-1 == i + j) {
+                            if(NULL != L_[getCPair(i,j)]) {
+                                std::cout << "Proc " << id_ << "pops cell ["
+                                    << i <<","<< j << "] addr: " 
+                                    << L_[getCPair(i,j)][G-1] << std::endl
+                                    << std::flush;
+                                bsp_pop_reg(L_[getCPair(i,j)][G-1]);
+                            }
+                            }
+                        }
+                    }
+                }
+                bsp_sync();
+            }
 
             bsp_sync();
-            // communicate rows 
-            for(int i = 0; i < chunkStride_; ++i) {
-                for(int j = 0; j < chunkStride_; ++j) {
-                    if( a == i + j &&
-                        id_ == i % n_ &&
-                        0 != i )
-                        retrieveLastRowInBlock(i-1, j, i, j);
+
+            for(int p = 0; p < 4; ++p) {
+                if(p == id_) {
+                    // register destinations
+                    for(int i = 0; i < chunkStride_; ++i) {
+                        for(int j = 0; j < chunkStride_; ++j) {
+                             //if(id_ == i%n_) {
+                             //   std::cout << "push proc " << id_ << 
+                             //             " Last Row in chunk [" << i << ", " <<
+                             //             j << "] addr: ";
+                             //   std::cout << L_[getCPair(i,j)][G-1]
+                             //             << std::endl << std::flush;
+                             //}
+                           if( a == i + j) {
+                               if(NULL != L_[getCPair(i,j)]) {
+                                std::cout << "Proc " << id_ << "regs cell ["
+                                    << i <<","<< j << "] addr: " 
+                                    << L_[getCPair(i,j)][G-1] << std::endl
+                                    << std::flush;
+                                bsp_push_reg(L_[getCPair(i,j)][G-1],
+                                             sizeof(int)*G);
+                               } else {
+                                   bsp_push_reg(NULL, 0);
+                               }
+                            }
+                        }
+                    }
                 }
+                bsp_sync();
             }
 
             bsp_sync();
@@ -335,11 +399,30 @@ DLeastCommonSubSequence::process() {
                         std::cout << "calculateChunk[" << i << ", " 
                                   << j << "] held by proc " << id_
                                   << std::endl << std::flush;
-                        //calculateChunk(i, j);
+                        calculateChunk(i, j);
+                        //// we will be reading from here at next wavefront
+                        //bsp_push_reg(L_[getCPair(i,j)][G-1],
+                        //             sizeof(int)*G);
                     }
                     bsp_sync();
                 }
+
             }
+            bsp_sync();
+            if(0 == id_) {
+                std::cout << "calced\n";
+            }
+            // communicate rows 
+            for(int i = 0; i < chunkStride_; ++i) {
+                for(int j = 0; j < chunkStride_; ++j) {
+                    if( a == i + j &&
+                        id_ == i % n_ &&
+                        chunkStride_-1 != i )
+                        sendLastRowInBlock(i+1%n_, i, j, i, j);
+                    bsp_sync();
+                }
+            }
+
             bsp_sync();
             if(0 == id_) {
                 std::cout << "================\n";
@@ -349,7 +432,7 @@ DLeastCommonSubSequence::process() {
 
         for(ChunkMapIter it = L_.begin();
             it != L_.end(); ++it) {
-            if(nullptr == it->second[0])
+            if(NULL == it->second[0])
             bsp_pop_reg(it->second[G-1]);
         }
 
