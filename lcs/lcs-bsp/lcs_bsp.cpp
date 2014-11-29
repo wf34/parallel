@@ -16,7 +16,7 @@ extern "C" {
 int givenSeed = 0;
 int problemSize = 0;
 
-class DLeastCommonSubSequence {
+class DLargestCommonSubSequence {
     public:
         typedef std::pair<int, int> CoordsPair;
         typedef std::map<CoordsPair, int**> ChunkMap;
@@ -27,8 +27,8 @@ class DLeastCommonSubSequence {
         typedef std::vector<int> Row;
         typedef std::vector<Row> Rows;
 
-        DLeastCommonSubSequence(int l);
-        ~DLeastCommonSubSequence();
+        DLargestCommonSubSequence(int l);
+        ~DLargestCommonSubSequence();
         void process();
         CoordsPair getCPair(int i, int j) {
             return std::make_pair(i,j);
@@ -74,14 +74,14 @@ class DLeastCommonSubSequence {
 };
 
 const char*
-DLeastCommonSubSequence::alphabet_ =
+DLargestCommonSubSequence::alphabet_ =
         "0123456789"
         "abcdefghijklmnopqrstuvwxyz";
 const int
-DLeastCommonSubSequence::procAmount_ = 4;
+DLargestCommonSubSequence::procAmount_ = 4;
 
 
-DLeastCommonSubSequence::DLeastCommonSubSequence(int l)
+DLargestCommonSubSequence::DLargestCommonSubSequence(int l)
         : length_(l) {
     id_ = bsp_pid();
     n_ = bsp_nprocs();
@@ -102,7 +102,7 @@ DLeastCommonSubSequence::DLeastCommonSubSequence(int l)
 
 
 
-DLeastCommonSubSequence::~DLeastCommonSubSequence() {
+DLargestCommonSubSequence::~DLargestCommonSubSequence() {
     if(a_)
         delete[] a_;
     if(b_)
@@ -117,7 +117,7 @@ DLeastCommonSubSequence::~DLeastCommonSubSequence() {
 
 
 void
-DLeastCommonSubSequence::distributedInit() {
+DLargestCommonSubSequence::distributedInit() {
     
 
     // allocate storage for rows before
@@ -167,7 +167,7 @@ DLeastCommonSubSequence::distributedInit() {
 
 
 void
-DLeastCommonSubSequence::printString(const char* name,
+DLargestCommonSubSequence::printString(const char* name,
                                      const char * data) {
     bsp_sync();
     if(0 == id_)
@@ -188,13 +188,13 @@ DLeastCommonSubSequence::printString(const char* name,
 
 
 int
-DLeastCommonSubSequence::getLocal(int i) {
+DLargestCommonSubSequence::getLocal(int i) {
     return i % chunkLength_;
 }
 
 
 int
-DLeastCommonSubSequence::getLElem(int gi,
+DLargestCommonSubSequence::getLElem(int gi,
                                   int gj) {
     int** chunk = L_[getCPair(gi / chunkLength_, gj / chunkLength_)];
     assert(NULL != chunk);
@@ -204,7 +204,7 @@ DLeastCommonSubSequence::getLElem(int gi,
 
 
 void
-DLeastCommonSubSequence::setLElem(int gi,
+DLargestCommonSubSequence::setLElem(int gi,
                                   int gj,
                                   int value) {
     int** chunk = L_[getCPair(gi / chunkLength_, gj / chunkLength_)];
@@ -219,7 +219,7 @@ DLeastCommonSubSequence::setLElem(int gi,
 }
 
 void
-DLeastCommonSubSequence::calculateChunk(int i,
+DLargestCommonSubSequence::calculateChunk(int i,
                                         int j) {
     for(int k = i*chunkLength_; k < (i+1)*chunkLength_; ++k) {
         for(int l = j*chunkLength_; l < (j+1)*chunkLength_; ++l) {
@@ -242,7 +242,7 @@ DLeastCommonSubSequence::calculateChunk(int i,
 
 
 void
-DLeastCommonSubSequence::process() {
+DLargestCommonSubSequence::process() {
 
     printString("A", a_);
     printString("B", b_);
@@ -331,14 +331,14 @@ void run() {
     if(givenSeed) {
         srand(givenSeed);
     } else {
-        givenSeed = time(NULL);
+        givenSeed = 34; //time(NULL);
         std::cout << "Seed: " << givenSeed << std::endl;
     }
     srand(givenSeed);
 
-    bsp_begin(DLeastCommonSubSequence::procAmount_);
+    bsp_begin(DLargestCommonSubSequence::procAmount_);
     if(problemSize)
-        DLeastCommonSubSequence(problemSize).process();
+        DLargestCommonSubSequence(problemSize).process();
     else
         std::cout << "unreachable" << std::endl;
     bsp_end();
@@ -349,7 +349,7 @@ int main(int argc, char** argv) {
     bsp_init(run, argc, argv);
     if(argc >= 2) {
         problemSize = atoi(argv[1]);
-        if(0 != problemSize % DLeastCommonSubSequence::procAmount_) {
+        if(0 != problemSize % DLargestCommonSubSequence::procAmount_) {
             std::cout << "problemSize must be divisible by procAmount_"
                       << std::endl;
             return -1;

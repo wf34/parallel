@@ -11,13 +11,13 @@ extern "C" {
 int givenSeed = 0;
 int problemSize = 0;
 
-class LeastCommonSubSequence {
+class LargestCommonSubSequence {
     public:
-        LeastCommonSubSequence(int l);
-        LeastCommonSubSequence(const char* a,
+        LargestCommonSubSequence(int l);
+        LargestCommonSubSequence(const char* a,
                                const char* b);
 
-        ~LeastCommonSubSequence();
+        ~LargestCommonSubSequence();
 
         void process();
     private:
@@ -30,12 +30,12 @@ class LeastCommonSubSequence {
 
 
 const char*
-LeastCommonSubSequence::alphabet_ =
+LargestCommonSubSequence::alphabet_ =
         "0123456789"
         "abcdefghijklmnopqrstuvwxyz";
 
 
-LeastCommonSubSequence::LeastCommonSubSequence(int l)
+LargestCommonSubSequence::LargestCommonSubSequence(int l)
         : a_(new char[l+1])
         , b_(new char[l+1])
         , L_(new int*[l+1])
@@ -54,7 +54,7 @@ LeastCommonSubSequence::LeastCommonSubSequence(int l)
     //          << "B [" << b_ << "]" << std::endl;
 }
 
-LeastCommonSubSequence::LeastCommonSubSequence(const char* a,
+LargestCommonSubSequence::LargestCommonSubSequence(const char* a,
                                                const char* b)
         : length_(strlen(a))
         , a_(new char[length_+1])
@@ -73,7 +73,7 @@ LeastCommonSubSequence::LeastCommonSubSequence(const char* a,
 }
 
 
-LeastCommonSubSequence::~LeastCommonSubSequence() {
+LargestCommonSubSequence::~LargestCommonSubSequence() {
     if(a_)
         delete[] a_;
     if(b_)
@@ -87,7 +87,7 @@ LeastCommonSubSequence::~LeastCommonSubSequence() {
 
 
 void
-LeastCommonSubSequence::process() {
+LargestCommonSubSequence::process() {
     double tStart = bsp_time();
     {
         for(int i = 1; i <= length_; ++i) {
@@ -130,11 +130,11 @@ void run() {
     srand(givenSeed);
     bsp_begin(1);
     if(problemSize)
-        LeastCommonSubSequence(problemSize).process();
+        LargestCommonSubSequence(problemSize).process();
     else
-        LeastCommonSubSequence("mihmmjgfgmoaemcj",
+        LargestCommonSubSequence("mihmmjgfgmoaemcj",
                                 "akngjmjfdnmhiihd").process();
-        //LeastCommonSubSequence("design", "define").process();
+        //LargestCommonSubSequence("design", "define").process();
     bsp_end();
 }
 
