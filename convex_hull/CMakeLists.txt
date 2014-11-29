@@ -43,6 +43,6 @@ set_target_properties (${test_project}
 target_link_libraries (${test_project}
                        ${GTEST_LIBRARY}
                        ${GTEST_MAIN_LIBRARY}
-                       ${QHULL_LIBRARY}
-                       qhull_p)
+                       /usr/lib64/libqhullcpp.a
+                       ${QHULL_LIBRARY})
 
