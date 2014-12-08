@@ -25,24 +25,24 @@ target_link_libraries (${current_project}
                        pthread rt)
 
 ################################################################
-enable_testing ()
-set (test_project "${current_project}_test")
-
-find_package (GTest REQUIRED)
-message (STATUS "GTest libs: ${GTEST_LIBRARIES}")
-find_package (Qhull REQUIRED)
-include_directories (${QHULL_INCLUDE_DIRS})
-
-file (GLOB test_source ${PROJECT_SOURCE_DIR}/test/*.cpp)
-
-add_executable (${test_project} ${test_source})
-set_target_properties (${test_project}
-                       PROPERTIES COMPILE_DEFINITIONS
-                       "TESTING")
-
-target_link_libraries (${test_project}
-                       ${GTEST_LIBRARY}
-                       ${GTEST_MAIN_LIBRARY}
-                       /usr/lib64/libqhullcpp.a
-                       ${QHULL_LIBRARY})
+#enable_testing ()
+#set (test_project "${current_project}_test")
+#
+#find_package (GTest REQUIRED)
+#message (STATUS "GTest libs: ${GTEST_LIBRARIES}")
+#find_package (Qhull REQUIRED)
+#include_directories (${QHULL_INCLUDE_DIRS})
+#
+#file (GLOB test_source ${PROJECT_SOURCE_DIR}/test/*.cpp)
+#
+#add_executable (${test_project} ${test_source})
+#set_target_properties (${test_project}
+#                       PROPERTIES COMPILE_DEFINITIONS
+#                       "TESTING")
+#
+#target_link_libraries (${test_project}
+#                       ${GTEST_LIBRARY}
+#                       ${GTEST_MAIN_LIBRARY}
+#                       /usr/local/lib/libqhullcpp.a
+#                       ${QHULL_LIBRARY})
 
