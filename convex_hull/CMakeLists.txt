@@ -5,24 +5,32 @@ cmake_minimum_required(VERSION 2.8)
 set (CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++11")
 
-set (common_directory "${PROJECT_SOURCE_DIR}/../common")
-
-set (MCBSP_DIR "${PROJECT_SOURCE_DIR}/../MulticoreBSP-for-C")
-set (MCBSP_LIBDIR "${MCBSP_DIR}/lib")
-set (MCBSP_INCDIR "${MCBSP_DIR}/include")
+if (parallel_version)
+    set (common_directory "${PROJECT_SOURCE_DIR}/../common")
+    set (MCBSP_DIR "${PROJECT_SOURCE_DIR}/../MulticoreBSP-for-C")
+    set (MCBSP_LIBDIR "${MCBSP_DIR}/lib")
+    set (MCBSP_INCDIR "${MCBSP_DIR}/include")
+    include_directories ("${MCBSP_INCDIR}" "${common_directory}")
+endif ()
 
 include_directories ("${PROJECT_SOURCE_DIR}/include")
-include_directories ("${MCBSP_INCDIR}" "${common_directory}")
 
 file (GLOB source ${PROJECT_SOURCE_DIR}/src/*.cpp)
 
-add_executable (${current_project}
-                "${common_directory}/bspedupack.c"
-                ${source})
-
-target_link_libraries (${current_project}
-                       "${MCBSP_LIBDIR}/libmcbsp1.2.0.a"
-                       pthread rt)
+if (parallel_version)
+    add_executable (${current_project}
+                    "${common_directory}/bspedupack.c"
+                    ${source}
+                   )
+    target_link_libraries (${current_project}
+                           "${MCBSP_LIBDIR}/libmcbsp1.2.0.a"
+                           pthread rt
+                          )
+else ()
+    add_executable (${current_project}
+                    ${source}
+                   )
+endif ()
 
 ################################################################
 #enable_testing ()
