@@ -4,8 +4,9 @@ from subprocess import Popen, PIPE, STDOUT
 convex_hull_app = "C:/projects/parallel/convex_hull/build/Release/convex_hull.exe"
 
 
-def test ():
-    rbox_process = Popen (['rbox', '10', 'D2'], stdout = PIPE)
+def hull_test (seed):
+    seeding_argument = 't' + str(seed)
+    rbox_process = Popen (['rbox', '10', 'D2', seeding_argument], stdout = PIPE)
     problem = rbox_process.communicate ()
     print "==========\n", problem[0], "==========\n"
 
@@ -24,5 +25,15 @@ def test ():
 
 
 
+def testing ():
+    # tests_amount = 2
+    # random_seeds = [350, 1815]
+    # for x in range (0, 2):
+    #     print "*** TEST", x, "**********"
+    #     hull_test (random_seeds[x])
+    hull_test (1815)
+
+
+
 if __name__ == "__main__":
-    test ()
+    testing ()
