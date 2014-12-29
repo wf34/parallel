@@ -27,6 +27,7 @@ struct Point2D {
     double x;
     double y;
 };
+std::ostream& operator<< (std::ostream& stream, const Point2D& point);
 
 vector<Point2D> read_points (std::istream& stream = cin);
 void write_points (const vector<Point2D>& points, std::ostream& stream = cout);
@@ -75,10 +76,10 @@ struct compare_points_polar_angle_bigger {
         // Find orientation
         orientation_status status = orientation (seed_point, first, second);
         if (status == COLLINEAR) {
-            return dist (seed_point, first) < dist (seed_point, second);
+            return dist (seed_point, first) >= dist (seed_point, second);
         }
 
-        return status == CLOCKWISE;
+        return status != CLOCKWISE;
     }
 
     Point2D seed_point;
@@ -104,6 +105,13 @@ bool Point2D::operator < (const Point2D& b) {
     if (y != b.y)
         return y < b.y;
     return x < b.x;
+}
+
+
+
+std::ostream& operator<< (std::ostream& stream, const Point2D& point) {
+    stream << "[" << point.x << ", " << point.y << "]";
+    return stream;
 }
 
 
@@ -140,7 +148,6 @@ void write_points (const vector<Point2D>& points, std::ostream& stream) {
 
 
 vector<Point2D> graham_scan (vector<Point2D> points) {
-    // Find the bottommost point
     auto bottommost_element = std::min_element (points.cbegin(), points.cend (),
                                                 compare_points_closer_to_leftmost ());
     vector<Point2D>::iterator bottommost = points.begin ();
@@ -151,13 +158,14 @@ vector<Point2D> graham_scan (vector<Point2D> points) {
     std::sort (points.begin () + 1, points.end (),
                compare_points_polar_angle_bigger (*points.begin ()));
 
-    int points_in_hull = 1;
-    for (int i = 2; i < points.size (); ++i)
-    {   while (COUNTER_CLOCKWISE != orientation (points.at (points_in_hull - 1),
-                                                 points.at (points_in_hull),
+    vector <Point2D> hull = { points.at (0), points.at (1) };
+    int i = 2;
+    while (i < points.size ())
+    {   while (COUNTER_CLOCKWISE != orientation (*(hull.end () - 2),
+                                                 *(hull.end () - 1),
                                                  points.at (i)))
-        {   if (points_in_hull > 1)
-            {   --points_in_hull;
+        {   if (hull.size () > 2)
+            {   hull.pop_back ();
             } else if (i == points.size () - 1)
             {   break;
             } else
@@ -165,21 +173,16 @@ vector<Point2D> graham_scan (vector<Point2D> points) {
             }
         }
 
-        ++points_in_hull;
-        std::swap (points.at (points_in_hull), points.at (i));
+        hull.emplace_back (points.at (i));
+        ++i;
     }
 
-    vector <Point2D> hull;
-    std::copy (points.begin (), points.begin() + points_in_hull, std::back_inserter (hull));
 
     return hull;
 }
 
 
 orientation_status orientation (const Point2D& p, const Point2D& q, const Point2D& r) {
-    //double val = (r.x - q.x) * (q.y - p.y) -
-    //    (q.x - p.x) * (r.y - q.y);
-
     double val = (q.x - p.x) * (r.y - p.y) -
         (r.x - p.x) * (q.y - p.y);
 
@@ -187,7 +190,6 @@ orientation_status orientation (const Point2D& p, const Point2D& q, const Point2
         return COLLINEAR;
     }
 
-    //return (val > 0.0) ? CLOCKWISE : COUNTER_CLOCKWISE;
     return (val > 0.0) ? COUNTER_CLOCKWISE : CLOCKWISE;
 }
 
@@ -295,6 +297,7 @@ void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull) {
             point.y == points.front ().y)
         {   current_color = green_colour;
         }
+
         FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y, &current_color);
         FreeImage_SetPixelColor (bitmap, frame_point.x + 1, frame_point.y, &current_color);
         FreeImage_SetPixelColor (bitmap, frame_point.x - 1, frame_point.y, &current_color);
@@ -309,75 +312,6 @@ void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull) {
 }
 
 
-//////////////////////////////////////////////////////
-
-namespace china {
-
-using namespace std;
-
-    // Point having the least y coordinate, used for sorting other points
-    // according to polar angle about this point
-    Point2D pivot;
-    // returns -1 if a -> b -> c forms a counter-clockwise turn,
-    // +1 for a clockwise turn, 0 if they are collinear
-    int ccw (Point2D a, Point2D b, Point2D c) {
-        int area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-        if (area > 0)
-            return -1;
-        else if (area < 0)
-            return 1;
-        return 0;
-    }
-    // returns square of Euclidean distance between two points
-    int sqrDist (Point2D a, Point2D b) {
-        int dx = a.x - b.x, dy = a.y - b.y;
-        return dx * dx + dy * dy;
-    }
-    // used for sorting points according to polar order w.r.t the pivot
-    bool POLAR_ORDER (Point2D a, Point2D b) {
-        int order = ccw (pivot, a, b);
-        if (order == 0)
-            return sqrDist (pivot, a) < sqrDist (pivot, b);
-        return (order == -1);
-    }
-    vector<Point2D> grahamScan (vector<Point2D> points) {
-        vector<Point2D> hull;
-        if (points.size () < 3)
-            return hull;
-        // find the point having the least y coordinate (pivot),
-        // ties are broken in favor of lower x coordinate
-        int leastY = 0;
-        for (int i = 1; i < points.size (); i++)
-        if (points[i] < points[leastY])
-            leastY = i;
-        // swap the pivot with the first point
-        Point2D temp = points[0];
-        points[0] = points[leastY];
-        points[leastY] = temp;
-        // sort the remaining point according to polar order about the pivot
-        pivot = points[0];
-        sort (points.begin (), points.end (), POLAR_ORDER);
-        hull.push_back (points[0]);
-        hull.push_back (points[1]);
-        hull.push_back (points[2]);
-        for (int i = 3; i < points.size (); i++) {
-            Point2D top = hull.back ();
-            hull.pop_back ();
-            int status;
-            while ((status = ccw (hull.back (), top, points[i])) != -1) {
-                    top = hull.back ();
-                    hull.pop_back ();
-
-            }
-            hull.push_back (top);
-            hull.push_back (points[i]);
-        }
-        return hull;
-    }
-} // namespace china
-
-//////////////////////////////////////////////////////
-
 
 int main () {
     cout.setf (std::ios_base::fixed, std::ios_base::floatfield);
@@ -385,10 +319,9 @@ int main () {
 
     vector<Point2D> points = read_points ();
     vector<Point2D> convex_hull = graham_scan (points);
-    //vector<Point2D> convex_hull = china::grahamScan (points);
     write_points (convex_hull);
 
 
-    draw_hull (points, convex_hull); // std::vector<Point2D> ()
+    draw_hull (points, convex_hull);
     return 0;
 }
