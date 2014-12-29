@@ -10,6 +10,8 @@
 
 extern "C" {
 #include "FreeImage.h"
+
+#include "mcbsp.h"
 }
 
 using std::cin;
@@ -85,6 +87,28 @@ struct compare_points_polar_angle_bigger {
     Point2D seed_point;
 };
 
+class parallel_2d_hull {
+public:
+    void lead_init (const vector<Point2D>& points);
+    void distribute_input ();
+    void compute_hull ();
+    vector<Point2D> collect_output ();
+    vector<Point2D> get_whole_set ();
+
+private:
+    int id_;
+    int processors_amount_;
+    int subset_cardinality_;
+
+    vector <Point2D> whole_pointset_;
+    vector <Point2D> local_subset_;
+};
+
+const int PROCESSORS_AMOUNT_ = 4;
+const int LEAD_PROCESSOR_ID_ = 0;
+
+void compute_2d_hull_with_bsp ();
+
 /////////////////////////////////////////////////////////////////////////////
 
 Point2D::Point2D ()
@@ -137,6 +161,8 @@ vector<Point2D> read_points (std::istream& stream) {
 
 
 void write_points (const vector<Point2D>& points, std::ostream& stream) {
+    cout.setf (std::ios_base::fixed, std::ios_base::floatfield);
+    cout.precision (17);
     const int dimensionality = 2;
     stream << dimensionality << endl;
     stream << points.size () << endl;
@@ -313,15 +339,86 @@ void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull) {
 
 
 
-int main () {
-    cout.setf (std::ios_base::fixed, std::ios_base::floatfield);
-    cout.precision (17);
+void parallel_2d_hull::lead_init (const vector<Point2D>& points) {
+    if (LEAD_PROCESSOR_ID_ == bsp_pid ())
+    {   whole_pointset_ = points;
+        // possible to distribute uniformly
+        assert (0 == whole_pointset_.size () % PROCESSORS_AMOUNT_);
+        // input compient with algorithm slackness 
+        assert (whole_pointset_.size () >= std::pow (PROCESSORS_AMOUNT_, 3));
+        subset_cardinality_ = whole_pointset_.size () / PROCESSORS_AMOUNT_;
+    }
+}
 
-    vector<Point2D> points = read_points ();
-    vector<Point2D> convex_hull = graham_scan (points);
-    write_points (convex_hull);
 
 
-    draw_hull (points, convex_hull);
+void parallel_2d_hull::distribute_input () {
+    id_ = bsp_pid ();
+    processors_amount_ = bsp_nprocs ();
+
+    local_subset_.reserve (subset_cardinality_);
+    bsp_push_reg (local_subset_.data (), local_subset_.capacity () * sizeof (Point2D));
+    bsp_sync ();
+    if (LEAD_PROCESSOR_ID_ == id_) 
+    {   for (int i = 0; i < PROCESSORS_AMOUNT_; ++i)
+        {   bsp_put (i,
+                     whole_pointset_.data () + subset_cardinality_ * i,
+                     local_subset_.data (),
+                     0,
+                     subset_cardinality_ * sizeof (Point2D));
+        }
+    }
+    bsp_sync ();
+}
+
+
+
+void parallel_2d_hull::compute_hull () {
+}
+
+
+
+vector<Point2D> parallel_2d_hull::collect_output () {
+    vector<Point2D> convex_hull;
+    convex_hull.reserve (whole_pointset_.size ());
+    for (int i = 0; i < PROCESSORS_AMOUNT_; ++i)
+    {   bsp_get (i,
+                 local_subset_.data (),
+                 0,
+                 convex_hull.data () + local_subset_.size () * i,
+                 local_subset_.size () * sizeof (Point2D));
+    }
+}
+
+vector<Point2D> parallel_2d_hull::get_whole_set () {
+    if (LEAD_PROCESSOR_ID_ != id_ || whole_pointset_.empty ())
+    {   return vector<Point2D> ();
+    }
+    return whole_pointset_;
+}
+
+void compute_2d_hull_with_bsp () {
+    bsp_begin (PROCESSORS_AMOUNT_);
+    parallel_2d_hull computer;
+    if (LEAD_PROCESSOR_ID_ == bsp_pid ())
+    {   vector<Point2D> points = read_points ();
+        computer.lead_init (points);
+    }
+    computer.distribute_input ();
+    computer.compute_hull ();
+
+    if (LEAD_PROCESSOR_ID_ == bsp_pid ())
+    {   vector<Point2D> convex_hull = computer.collect_output ();
+        write_points (convex_hull);
+        // draw_hull (computer.get_whole_set (), convex_hull);
+    }
+
+    bsp_end ();
+}
+
+int main (int argc, char ** argv) {
+    bsp_init( compute_2d_hull_with_bsp, argc, argv );
+    compute_2d_hull_with_bsp ();
+
     return 0;
 }
