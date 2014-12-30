@@ -6,7 +6,7 @@
 #include <iostream>
 
 extern "C" {
-#include "include/mcbsp.h"
+#include "mcbsp.h"
 }
 
 
@@ -28,11 +28,11 @@ void withPut() {
                 //std::cout << "proc " << bsp_pid() << " unregistered "
                 //          << m['m'] << std::endl << std::flush;
             }
-            if(1 == bsp_pid() % 2) {
+            //if(1 == bsp_pid() % 2) {
                 std::cout << "proc " << bsp_pid() << " registering "
                           << m['s'] << std::endl << std::flush;
                 bsp_push_reg(m['s'], 3*sizeof(int));
-            }
+            //}
         }
         bsp_sync();
     }
@@ -114,18 +114,28 @@ void spmd() {
     bsp_begin( 4 );
     /// Init
     std::vector<unsigned int> a;
+    std::vector<unsigned int> b;
     a.resize(3);
-    bsp_push_reg(a.data(), a.capacity()*sizeof(unsigned int));
+
 
     if(0 == bsp_pid() % 2) {
         a = {bsp_pid()*5+1, bsp_pid()*10+1, bsp_pid()*15+1};
+        b = {bsp_pid()*5+1, bsp_pid()*10+1, bsp_pid()*15+1};
     }
 
     bsp_sync();
+
+        bsp_push_reg (b.data (),
+                      b.size () * sizeof(unsigned int));
+
+    bsp_sync ();
     // getting values of even into odd
     if(1 == bsp_pid() % 2) {
-        bsp_get(bsp_pid() - 1, a.data(), 0,
-                a.data(), 3 * sizeof(unsigned int));
+        bsp_get(0,
+                b.data(),
+                1* sizeof(unsigned int),
+                a.data(),
+                2 * sizeof(unsigned int));
     }
     
     bsp_sync();
@@ -141,12 +151,12 @@ void spmd() {
         }
         bsp_sync();
     }
-    bsp_pop_reg(a.data());
+    bsp_pop_reg (b.data());
     bsp_end();
 }
 
 int main( int argc, char ** argv ) {
-    bsp_init( &withPut, argc, argv );
-    withPut();
+    bsp_init( &spmd, argc, argv );
+    spmd();
     return EXIT_SUCCESS;
 }
