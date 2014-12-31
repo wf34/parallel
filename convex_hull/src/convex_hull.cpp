@@ -39,6 +39,7 @@ vector<Point2D> graham_scan (vector<Point2D> points);
 vector<Point2D> compute_enet (const vector<Point2D>& points);
 
 void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull);
+void draw_subset (const vector<Point2D>& points, const vector<Point2D>& subset);
 void draw_line (FIBITMAP* bitmap, const Point2D& src, const Point2D& dst);
 
 enum orientation_status {
@@ -115,6 +116,9 @@ private:
 
 const int PROCESSORS_AMOUNT_ = 4;
 const int LEAD_PROCESSOR_ID_ = 0;
+
+vector<Point2D> points;
+vector<Point2D> convex_hull;
 
 void compute_2d_hull_with_bsp ();
 
@@ -354,6 +358,92 @@ void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull) {
 }
 
 
+void draw_subset (const vector<Point2D>& points, const vector<Point2D>& subset)
+{
+    const int width = 640;
+    const int height = 480;
+
+    std::function <bool (const Point2D&, const Point2D&)> compare_points_farther =
+        [](const Point2D& first, const Point2D& second) -> bool
+    {   return std::max (std::abs (first.x), std::abs (first.y)) <
+    std::max (std::abs (second.x), std::abs (second.y));
+    };
+
+    auto most_distant_point = std::max_element (points.cbegin (), points.cend (), compare_points_farther);
+    const double scale = 200 / std::max (std::abs (most_distant_point->x), std::abs (most_distant_point->y));
+    const double center_x = static_cast<double> (width) / 2.0;
+    const double center_y = static_cast<double> (height) / 2.0;
+    const int bits_per_pixel = 24;
+    FreeImage_Initialise ();
+    FIBITMAP* bitmap = FreeImage_Allocate (width, height, bits_per_pixel);
+
+    if (nullptr == bitmap)
+    {
+        cout << "bitmap creation failed" << endl;
+        return;
+    }
+
+    std::function <Point2D (const Point2D&)> convert_to_frame_space =
+        [scale, center_x, center_y](const Point2D& point) -> Point2D
+    {   Point2D frame_point;
+    frame_point.x = point.x * scale + center_x;
+    frame_point.y = point.y * scale + center_y;
+    return frame_point;
+    };
+
+    RGBQUAD green_colour;
+    green_colour.rgbRed = 0;
+    green_colour.rgbGreen = 255;
+    green_colour.rgbBlue = 0;
+    RGBQUAD red_colour;
+    red_colour.rgbRed = 255;
+    red_colour.rgbGreen = 0;
+    red_colour.rgbBlue = 0;
+    RGBQUAD white_colour;
+    white_colour.rgbRed = 255;
+    white_colour.rgbGreen = 255;
+    white_colour.rgbBlue = 255;
+    RGBQUAD black_colour;
+    black_colour.rgbRed = 0;
+    black_colour.rgbGreen = 0;
+    black_colour.rgbBlue = 0;
+
+    FreeImage_FillBackground (bitmap, &white_colour);
+    draw_line (bitmap, Point2D (center_x, 0), Point2D (center_x, height));
+    draw_line (bitmap, Point2D (0, center_y), Point2D (width, center_y));
+
+    for (const Point2D& point : points)
+    {
+        Point2D frame_point = convert_to_frame_space (point);
+        RGBQUAD current_color (black_colour);
+
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x + 1, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x - 1, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y - 1, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y + 1, &current_color);
+    }
+
+    for (const Point2D& point : subset)
+    {
+        Point2D frame_point = convert_to_frame_space (point);
+        RGBQUAD current_color (red_colour);
+
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x + 1, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x - 1, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y - 1, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y + 1, &current_color);
+    }
+
+    if (0 == FreeImage_Save (FIF_PNG, bitmap, "C:/projects/parallel/convex_hull/build/Release/hull.png"))
+    {
+        cout << "Saving failed" << endl;
+    }
+    FreeImage_DeInitialise ();
+}
+
+
 
 void parallel_2d_hull::lead_init (const vector<Point2D>& points) {
     if (LEAD_PROCESSOR_ID_ == bsp_pid ())
@@ -422,7 +512,7 @@ void parallel_2d_hull::compute_hull () {
     bsp_sync ();
     LOG_LEAD ("Samples collected");
     if (LEAD_PROCESSOR_ID_ == id_)
-    {   draw_hull (whole_pointset_, samples_set_);
+    {   draw_subset (whole_pointset_, samples_set_);
     }
     //if (LEAD_PROCESSOR_ID_ == id_)
     //{   vector <Point2D> splitters = compute_enet (samples_set_);
@@ -520,8 +610,7 @@ void parallel_2d_hull::collect_all_samples (const vector<Point2D>& local_samples
 }
 
 
-vector<Point2D> points;
-vector<Point2D> convex_hull;
+
 void compute_2d_hull_with_bsp () {
     bsp_begin (PROCESSORS_AMOUNT_);
     LOG_LEAD ("begin");
