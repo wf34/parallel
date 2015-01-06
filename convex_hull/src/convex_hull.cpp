@@ -10,7 +10,11 @@
 
 extern "C" {
 #include "FreeImage.h"
+
+#include "mcbsp.h"
 }
+
+#include "logging.h"
 
 using std::cin;
 using std::cout;
@@ -20,19 +24,22 @@ using std::vector;
 
 
 struct Point2D {
-    Point2D ();
-    Point2D (double x, double y);
+    Point2D ();Point2D (double x, double y);
     bool operator < (const Point2D& b);
 
     double x;
     double y;
 };
+std::ostream& operator<< (std::ostream& stream, const Point2D& point);
 
 vector<Point2D> read_points (std::istream& stream = cin);
 void write_points (const vector<Point2D>& points, std::ostream& stream = cout);
 vector<Point2D> graham_scan (vector<Point2D> points);
+// triangles association (by CS341, pp.125)
+vector<Point2D> compute_enet (const vector<Point2D>& points);
 
 void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull);
+void draw_subset (const vector<Point2D>& points, const vector<Point2D>& subset);
 void draw_line (FIBITMAP* bitmap, const Point2D& src, const Point2D& dst);
 
 enum orientation_status {
@@ -75,14 +82,45 @@ struct compare_points_polar_angle_bigger {
         // Find orientation
         orientation_status status = orientation (seed_point, first, second);
         if (status == COLLINEAR) {
-            return dist (seed_point, first) < dist (seed_point, second);
+            return dist (seed_point, first) >= dist (seed_point, second);
         }
 
-        return status == CLOCKWISE;
+        return status != CLOCKWISE;
     }
 
     Point2D seed_point;
 };
+
+class parallel_2d_hull {
+public:
+    void lead_init (const vector<Point2D>& points);
+    void distribute_input ();
+    void compute_hull ();
+    void collect_output (vector<Point2D>& destination);
+    vector<Point2D> get_whole_set ();
+
+    void print_local_set (const vector<Point2D>& data);
+
+private:
+    vector<Point2D> compute_local_samples ();
+    void collect_all_samples (const vector<Point2D>& local_data);
+
+    int id_;
+    int processors_amount_;
+    int subset_cardinality_;
+
+    vector <Point2D> whole_pointset_;
+    vector <Point2D> local_subset_;
+    vector <Point2D> samples_set_;
+};
+
+const int PROCESSORS_AMOUNT_ = 4;
+const int LEAD_PROCESSOR_ID_ = 0;
+
+vector<Point2D> points;
+vector<Point2D> convex_hull;
+
+void compute_2d_hull_with_bsp ();
 
 /////////////////////////////////////////////////////////////////////////////
 
@@ -108,6 +146,13 @@ bool Point2D::operator < (const Point2D& b) {
 
 
 
+std::ostream& operator<< (std::ostream& stream, const Point2D& point) {
+    stream << "[" << point.x << ", " << point.y << "]";
+    return stream;
+}
+
+
+
 vector<Point2D> read_points (std::istream& stream) {
     string status_line;
     std::getline (cin, status_line);
@@ -129,6 +174,8 @@ vector<Point2D> read_points (std::istream& stream) {
 
 
 void write_points (const vector<Point2D>& points, std::ostream& stream) {
+    cout.setf (std::ios_base::fixed, std::ios_base::floatfield);
+    cout.precision (17);
     const int dimensionality = 2;
     stream << dimensionality << endl;
     stream << points.size () << endl;
@@ -140,7 +187,6 @@ void write_points (const vector<Point2D>& points, std::ostream& stream) {
 
 
 vector<Point2D> graham_scan (vector<Point2D> points) {
-    // Find the bottommost point
     auto bottommost_element = std::min_element (points.cbegin(), points.cend (),
                                                 compare_points_closer_to_leftmost ());
     vector<Point2D>::iterator bottommost = points.begin ();
@@ -151,13 +197,14 @@ vector<Point2D> graham_scan (vector<Point2D> points) {
     std::sort (points.begin () + 1, points.end (),
                compare_points_polar_angle_bigger (*points.begin ()));
 
-    int points_in_hull = 1;
-    for (int i = 2; i < points.size (); ++i)
-    {   while (COUNTER_CLOCKWISE != orientation (points.at (points_in_hull - 1),
-                                                 points.at (points_in_hull),
+    vector <Point2D> hull = { points.at (0), points.at (1) };
+    int i = 2;
+    while (i < points.size ())
+    {   while (COUNTER_CLOCKWISE != orientation (*(hull.end () - 2),
+                                                 *(hull.end () - 1),
                                                  points.at (i)))
-        {   if (points_in_hull > 1)
-            {   --points_in_hull;
+        {   if (hull.size () > 2)
+            {   hull.pop_back ();
             } else if (i == points.size () - 1)
             {   break;
             } else
@@ -165,21 +212,23 @@ vector<Point2D> graham_scan (vector<Point2D> points) {
             }
         }
 
-        ++points_in_hull;
-        std::swap (points.at (points_in_hull), points.at (i));
+        hull.emplace_back (points.at (i));
+        ++i;
     }
 
-    vector <Point2D> hull;
-    std::copy (points.begin (), points.begin() + points_in_hull, std::back_inserter (hull));
 
     return hull;
 }
 
 
-orientation_status orientation (const Point2D& p, const Point2D& q, const Point2D& r) {
-    //double val = (r.x - q.x) * (q.y - p.y) -
-    //    (q.x - p.x) * (r.y - q.y);
 
+vector<Point2D> compute_enet (const vector<Point2D>& points) {
+    assert (false);
+    return vector<Point2D> ();
+}
+
+
+orientation_status orientation (const Point2D& p, const Point2D& q, const Point2D& r) {
     double val = (q.x - p.x) * (r.y - p.y) -
         (r.x - p.x) * (q.y - p.y);
 
@@ -187,7 +236,6 @@ orientation_status orientation (const Point2D& p, const Point2D& q, const Point2
         return COLLINEAR;
     }
 
-    //return (val > 0.0) ? CLOCKWISE : COUNTER_CLOCKWISE;
     return (val > 0.0) ? COUNTER_CLOCKWISE : CLOCKWISE;
 }
 
@@ -295,6 +343,7 @@ void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull) {
             point.y == points.front ().y)
         {   current_color = green_colour;
         }
+
         FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y, &current_color);
         FreeImage_SetPixelColor (bitmap, frame_point.x + 1, frame_point.y, &current_color);
         FreeImage_SetPixelColor (bitmap, frame_point.x - 1, frame_point.y, &current_color);
@@ -309,86 +358,281 @@ void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull) {
 }
 
 
-//////////////////////////////////////////////////////
+void draw_subset (const vector<Point2D>& points, const vector<Point2D>& subset)
+{
+    const int width = 640;
+    const int height = 480;
 
-namespace china {
+    std::function <bool (const Point2D&, const Point2D&)> compare_points_farther =
+        [](const Point2D& first, const Point2D& second) -> bool
+    {   return std::max (std::abs (first.x), std::abs (first.y)) <
+    std::max (std::abs (second.x), std::abs (second.y));
+    };
 
-using namespace std;
+    auto most_distant_point = std::max_element (points.cbegin (), points.cend (), compare_points_farther);
+    const double scale = 200 / std::max (std::abs (most_distant_point->x), std::abs (most_distant_point->y));
+    const double center_x = static_cast<double> (width) / 2.0;
+    const double center_y = static_cast<double> (height) / 2.0;
+    const int bits_per_pixel = 24;
+    FreeImage_Initialise ();
+    FIBITMAP* bitmap = FreeImage_Allocate (width, height, bits_per_pixel);
 
-    // Point having the least y coordinate, used for sorting other points
-    // according to polar angle about this point
-    Point2D pivot;
-    // returns -1 if a -> b -> c forms a counter-clockwise turn,
-    // +1 for a clockwise turn, 0 if they are collinear
-    int ccw (Point2D a, Point2D b, Point2D c) {
-        int area = (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-        if (area > 0)
-            return -1;
-        else if (area < 0)
-            return 1;
-        return 0;
+    if (nullptr == bitmap)
+    {
+        cout << "bitmap creation failed" << endl;
+        return;
     }
-    // returns square of Euclidean distance between two points
-    int sqrDist (Point2D a, Point2D b) {
-        int dx = a.x - b.x, dy = a.y - b.y;
-        return dx * dx + dy * dy;
-    }
-    // used for sorting points according to polar order w.r.t the pivot
-    bool POLAR_ORDER (Point2D a, Point2D b) {
-        int order = ccw (pivot, a, b);
-        if (order == 0)
-            return sqrDist (pivot, a) < sqrDist (pivot, b);
-        return (order == -1);
-    }
-    vector<Point2D> grahamScan (vector<Point2D> points) {
-        vector<Point2D> hull;
-        if (points.size () < 3)
-            return hull;
-        // find the point having the least y coordinate (pivot),
-        // ties are broken in favor of lower x coordinate
-        int leastY = 0;
-        for (int i = 1; i < points.size (); i++)
-        if (points[i] < points[leastY])
-            leastY = i;
-        // swap the pivot with the first point
-        Point2D temp = points[0];
-        points[0] = points[leastY];
-        points[leastY] = temp;
-        // sort the remaining point according to polar order about the pivot
-        pivot = points[0];
-        sort (points.begin (), points.end (), POLAR_ORDER);
-        hull.push_back (points[0]);
-        hull.push_back (points[1]);
-        hull.push_back (points[2]);
-        for (int i = 3; i < points.size (); i++) {
-            Point2D top = hull.back ();
-            hull.pop_back ();
-            int status;
-            while ((status = ccw (hull.back (), top, points[i])) != -1) {
-                    top = hull.back ();
-                    hull.pop_back ();
 
-            }
-            hull.push_back (top);
-            hull.push_back (points[i]);
+    std::function <Point2D (const Point2D&)> convert_to_frame_space =
+        [scale, center_x, center_y](const Point2D& point) -> Point2D
+    {   Point2D frame_point;
+    frame_point.x = point.x * scale + center_x;
+    frame_point.y = point.y * scale + center_y;
+    return frame_point;
+    };
+
+    RGBQUAD green_colour;
+    green_colour.rgbRed = 0;
+    green_colour.rgbGreen = 255;
+    green_colour.rgbBlue = 0;
+    RGBQUAD red_colour;
+    red_colour.rgbRed = 255;
+    red_colour.rgbGreen = 0;
+    red_colour.rgbBlue = 0;
+    RGBQUAD white_colour;
+    white_colour.rgbRed = 255;
+    white_colour.rgbGreen = 255;
+    white_colour.rgbBlue = 255;
+    RGBQUAD black_colour;
+    black_colour.rgbRed = 0;
+    black_colour.rgbGreen = 0;
+    black_colour.rgbBlue = 0;
+
+    FreeImage_FillBackground (bitmap, &white_colour);
+    draw_line (bitmap, Point2D (center_x, 0), Point2D (center_x, height));
+    draw_line (bitmap, Point2D (0, center_y), Point2D (width, center_y));
+
+    for (const Point2D& point : points)
+    {
+        Point2D frame_point = convert_to_frame_space (point);
+        RGBQUAD current_color (black_colour);
+
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x + 1, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x - 1, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y - 1, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y + 1, &current_color);
+    }
+
+    for (const Point2D& point : subset)
+    {
+        Point2D frame_point = convert_to_frame_space (point);
+        RGBQUAD current_color (red_colour);
+
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x + 1, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x - 1, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y - 1, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y + 1, &current_color);
+    }
+
+    if (0 == FreeImage_Save (FIF_PNG, bitmap, "C:/projects/parallel/convex_hull/build/Release/hull.png"))
+    {
+        cout << "Saving failed" << endl;
+    }
+    FreeImage_DeInitialise ();
+}
+
+
+
+void parallel_2d_hull::lead_init (const vector<Point2D>& points) {
+    if (LEAD_PROCESSOR_ID_ == bsp_pid ())
+    {   whole_pointset_ = points;
+        // possible to distribute uniformly
+        assert (0 == whole_pointset_.size () % PROCESSORS_AMOUNT_);
+        // input compliant with algorithm slackness 
+        assert (whole_pointset_.size () >= std::pow (PROCESSORS_AMOUNT_, 3));
+        subset_cardinality_ = whole_pointset_.size () / PROCESSORS_AMOUNT_;
+        LOG_LEAD ("subset_cardinality_ appears to be " << subset_cardinality_);
+    }
+
+    bsp_push_reg (&subset_cardinality_, sizeof (int));
+    bsp_sync ();
+    if (LEAD_PROCESSOR_ID_ == bsp_pid ())
+    {   for (int i = 1; i < PROCESSORS_AMOUNT_; ++i)
+        {   bsp_put (i, &subset_cardinality_, &subset_cardinality_, 0, sizeof (int));
         }
-        return hull;
     }
-} // namespace china
+    bsp_sync ();
+    bsp_pop_reg (&subset_cardinality_);
+    bsp_sync ();
+}
 
-//////////////////////////////////////////////////////
 
 
-int main () {
-    cout.setf (std::ios_base::fixed, std::ios_base::floatfield);
-    cout.precision (17);
+void parallel_2d_hull::distribute_input () {
+    // basic init
+    id_ = bsp_pid ();
+    processors_amount_ = bsp_nprocs ();
+    LOG_ALL ("subset_cardinality_ is " << subset_cardinality_);
+    local_subset_.resize (subset_cardinality_);
+    bsp_sync();
+    // required for sucessful read
+    if (LEAD_PROCESSOR_ID_ != id_)
+    {   whole_pointset_.resize (subset_cardinality_ * processors_amount_);
+    }
+    bsp_sync();
+    bsp_push_reg (whole_pointset_.data (),
+                  whole_pointset_.size () * sizeof (Point2D));
 
-    vector<Point2D> points = read_points ();
-    vector<Point2D> convex_hull = graham_scan (points);
-    //vector<Point2D> convex_hull = china::grahamScan (points);
+    bsp_sync ();
+    bsp_get (LEAD_PROCESSOR_ID_,
+             whole_pointset_.data (),
+             subset_cardinality_ * id_ * sizeof (Point2D),
+             local_subset_.data (),
+             subset_cardinality_ * sizeof (Point2D));
+
+    bsp_sync ();
+    bsp_pop_reg (whole_pointset_.data ());
+    bsp_sync ();
+}
+
+
+
+void parallel_2d_hull::compute_hull () {
+    LOG_LEAD ("Computing samples...");
+    bsp_sync ();
+    vector<Point2D> local_samples = compute_local_samples ();
+    bsp_sync ();
+    LOG_LEAD ("Samples computed locally");
+    bsp_sync ();
+    // print_local_set
+    // bsp_sync ();
+    collect_all_samples (local_samples);
+    bsp_sync ();
+    LOG_LEAD ("Samples collected");
+    if (LEAD_PROCESSOR_ID_ == id_)
+    {   draw_subset (whole_pointset_, samples_set_);
+    }
+    //if (LEAD_PROCESSOR_ID_ == id_)
+    //{   vector <Point2D> splitters = compute_enet (samples_set_);
+    //}
+    //bsp_sync ();
+}
+
+
+
+void parallel_2d_hull::collect_output (vector<Point2D>& destination) {
+    bsp_push_reg (local_subset_.data (), local_subset_.size () *sizeof (Point2D));
+    bsp_sync ();
+    if (LEAD_PROCESSOR_ID_ == id_)
+    {   destination.resize (whole_pointset_.size ());
+        for (int i = 0; i < PROCESSORS_AMOUNT_; ++i)
+        {   bsp_get (i,
+                     local_subset_.data (),
+                     0,
+                     destination.data () + local_subset_.size () * i,
+                     local_subset_.size () * sizeof (Point2D));
+        }
+    }
+
+    bsp_sync ();
+    bsp_pop_reg (local_subset_.data ());
+    bsp_sync ();
+}
+
+vector<Point2D> parallel_2d_hull::get_whole_set () {
+    if (LEAD_PROCESSOR_ID_ != id_ || whole_pointset_.empty ())
+    {   return vector<Point2D> ();
+    }
+    return whole_pointset_;
+}
+
+
+
+void parallel_2d_hull::print_local_set (const vector<Point2D>& data)
+{   for (int i = 0; i < 5; ++i)
+    {   for (int j = 0; j < processors_amount_; ++j)
+        {
+            if (j == id_)
+            {   LOG_ALL (data.at (i));
+            }
+            bsp_sync ();
+        }
+    }
+}
+
+
+
+vector<Point2D> parallel_2d_hull::compute_local_samples () {
+    vector<Point2D> local_hull = graham_scan (local_subset_);
+    bsp_sync ();
+    LOG_LEAD ("Graham scan done");
+    bsp_sync ();
+    if (local_hull.size () <= processors_amount_)
+    {   assert (local_hull.size () == processors_amount_);
+        // not implemented case when local_hull.size () < p
+        return local_hull;
+    } else
+    {   // samples from local hull with regular step such that card (samples) = p
+        vector<Point2D> samples;
+        samples.reserve (local_hull.size ()); 
+        double step = static_cast<double> (local_hull.size () - 1) /
+                      static_cast<double> (processors_amount_ - 1);
+        for (int i = 0; i < processors_amount_; ++i)
+        {   int index = std::floor (i * step + 0.5);
+            assert (index < local_hull.size ());
+            samples.emplace_back (local_hull.at (index));
+        }
+        return samples;
+    }
+}
+
+
+
+void parallel_2d_hull::collect_all_samples (const vector<Point2D>& local_samples) {
+    assert (local_samples.size () == processors_amount_);
+    // allocate and register destination vector for all local samples
+    samples_set_.resize (std::pow (processors_amount_, 2));
+    bsp_push_reg (samples_set_.data (),
+                  samples_set_.size () * sizeof (Point2D));
+    bsp_sync ();
+
+    bsp_put (LEAD_PROCESSOR_ID_,
+             local_samples.data (),
+             samples_set_.data (),
+             id_ * local_samples.size () * sizeof (Point2D),
+             local_samples.size () * sizeof (Point2D));
+    bsp_sync ();
+
+    bsp_pop_reg (samples_set_.data ());
+    bsp_sync ();
+}
+
+
+
+void compute_2d_hull_with_bsp () {
+    bsp_begin (PROCESSORS_AMOUNT_);
+    LOG_LEAD ("begin");
+    parallel_2d_hull computer;
+    computer.lead_init (points);
+    computer.distribute_input ();
+    LOG_LEAD ("Input was distributed" << endl << "Computing ... ");
+    bsp_sync ();
+    computer.compute_hull ();
+    // debug request computer.print_local_set ();
+    bsp_sync ();
+    LOG_LEAD ("Computing ... done");
+    bsp_sync ();
+    computer.collect_output (convex_hull);
+    bsp_sync ();
+    bsp_end ();
+}
+
+int main (int argc, char ** argv) {
+    points = read_points ();
+    bsp_init( compute_2d_hull_with_bsp, argc, argv );
+    compute_2d_hull_with_bsp ();
     write_points (convex_hull);
-
-
-    draw_hull (points, convex_hull); // std::vector<Point2D> ()
     return 0;
 }
