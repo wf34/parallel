@@ -54,6 +54,30 @@ def hull_test (seed):
 
 
 
+def check_enet (seed):
+    seeding_argument = 't' + str(seed)
+    rbox_process = Popen (['rbox', '64', 'D2', seeding_argument], stdout = PIPE, shell = True)
+    problem = rbox_process.communicate ()
+    rbox_output = problem[0]
+    # print "==========\n", problem[0], "==========\n"
+
+    ch = subprocess.Popen([convex_hull_app_, 'p'], stdout=PIPE, stdin=PIPE, stderr=STDOUT, shell = True)
+    convex_hull_output = ch.communicate (input=problem[0])[0]
+    # print "Our Result:\n", convex_hull_output, "==========\n"
+
+    enet = deserialize_cycle (convex_hull_output)
+    first_line_end = rbox_output.find ('\n')
+    rbox_data = rbox_output [first_line_end + 1:]
+    #print "==========\n", rbox_data, "==========\n"
+    whole_pointset = deserialize_cycle (rbox_data)
+    # print "whole_pointset ==========="
+    # for x in range (len (whole_pointset)):
+    #     print whole_pointset[x][0], " ", whole_pointset[x][1]
+    print "enet ==========="
+    for x in range (len (enet)):
+        print enet[x][0], " ", enet[x][1]
+
+
 def testing ():
     tests_amount = 2
     random_seeds = [350, 1815]
@@ -62,7 +86,8 @@ def testing ():
 
     for x in range (10):
         print "*** TEST", x, "**********"
-        hull_test (random_seeds[x])
+        #hull_test (random_seeds[x])
+        check_enet (random_seeds[x])
 
 
 

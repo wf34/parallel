@@ -4,6 +4,7 @@
 #include <functional>
 #include <iostream>
 #include <iterator>
+#include <set>
 #include <stack>
 #include <string>
 #include <vector>
@@ -39,7 +40,7 @@ vector<Point2D> graham_scan (vector<Point2D> points);
 vector<Point2D> compute_enet (const vector<Point2D>& points);
 
 void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull);
-void draw_subset (const vector<Point2D>& points, const vector<Point2D>& subset);
+void draw_subset (const string& path, const vector<Point2D>& points, const vector<Point2D>& subset);
 void draw_line (FIBITMAP* bitmap, const Point2D& src, const Point2D& dst);
 
 enum orientation_status {
@@ -103,16 +104,28 @@ public:
 
 private:
     vector<Point2D> compute_local_samples ();
+    void compute_enet (const vector<Point2D>& points);
     void collect_all_samples (const vector<Point2D>& local_data);
 
     int id_;
     int processors_amount_;
     int subset_cardinality_;
 
-    vector <Point2D> whole_pointset_;
+    vector <Point2D> whole_pointset_; // exists only on LEAD
     vector <Point2D> local_subset_;
-    vector <Point2D> samples_set_;
+    vector <Point2D> samples_set_; // exists only on LEAD
+    vector <Point2D> splitters_; // exists only on LEAD
 };
+
+struct triangle {
+    triangle ();
+    std::pair<Point2D, Point2D> edge;
+    int weight;
+};
+
+vector<triangle> merge_light_triangles (const vector<triangle>& triangles,
+                                        double heaviness_threshold);
+vector<Point2D> produce_enet (const vector<triangle>& triangles_n_bins);
 
 const int PROCESSORS_AMOUNT_ = 4;
 const int LEAD_PROCESSOR_ID_ = 0;
@@ -123,6 +136,11 @@ vector<Point2D> convex_hull;
 void compute_2d_hull_with_bsp ();
 
 /////////////////////////////////////////////////////////////////////////////
+
+triangle::triangle ()
+    : weight (0.0) 
+    , edge (std::make_pair<Point2D, Point2D> ({-1,-1}, {-1,-1})) {
+}
 
 Point2D::Point2D ()
     : x (0.0)
@@ -222,12 +240,6 @@ vector<Point2D> graham_scan (vector<Point2D> points) {
 
 
 
-vector<Point2D> compute_enet (const vector<Point2D>& points) {
-    assert (false);
-    return vector<Point2D> ();
-}
-
-
 orientation_status orientation (const Point2D& p, const Point2D& q, const Point2D& r) {
     double val = (q.x - p.x) * (r.y - p.y) -
         (r.x - p.x) * (q.y - p.y);
@@ -239,6 +251,18 @@ orientation_status orientation (const Point2D& p, const Point2D& q, const Point2
     return (val > 0.0) ? COUNTER_CLOCKWISE : CLOCKWISE;
 }
 
+
+bool is_point_inside (const Point2D& p,
+                      const Point2D& a,
+                      const Point2D& b,
+                      const Point2D& c) {
+    bool with_edge_ab, with_edge_bc, with_edge_ca;
+    with_edge_ab = CLOCKWISE == orientation (p, a, b);
+    with_edge_bc = CLOCKWISE == orientation (p, b, c);
+    with_edge_ca = CLOCKWISE == orientation (p, c, a);
+    return with_edge_ab == with_edge_bc &&
+           with_edge_bc == with_edge_ca;
+}
 
 double dist (const Point2D& first, const Point2D& second) {
     return std::pow (first.x - second.x, 2) +
@@ -256,6 +280,38 @@ Point2D next_to_top (std::stack<Point2D>& S) {
     S.push (p);
     return res;
 }
+
+
+Point2D find_interior_point (const vector<Point2D>& points,
+                             const vector<Point2D>& hull) {
+    std::set<Point2D, compare_points_closer_to_leftmost> hull_set;
+    std::copy (hull.cbegin (), hull.cend (), std::inserter (hull_set, hull_set.end ()));
+    assert (hull_set.size () > 0);
+    for (const Point2D& p : points)
+    {   if (hull_set.end () == hull_set.find (p))
+        {   return p;
+        }
+    }
+    return {-1, -1};
+}
+
+
+
+vector<Point2D> find_interior_points (const vector<Point2D>& points,
+                                      const vector<Point2D>& hull,
+                                      const Point2D& origin_point) {
+    std::set<Point2D, compare_points_closer_to_leftmost> hull_set;
+    std::copy (hull.cbegin (), hull.cend (), std::inserter (hull_set, hull_set.end ()));
+    hull_set.emplace (origin_point);
+    vector<Point2D> interior_points;
+    for (const Point2D& p : points)
+    {   if (hull_set.end () == hull_set.find (p))
+        {   interior_points.emplace_back (p);
+        }
+    }
+    return interior_points;
+}
+
 
 
 void draw_line (FIBITMAP* bitmap, const Point2D& src, const Point2D& dst)
@@ -358,15 +414,17 @@ void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull) {
 }
 
 
-void draw_subset (const vector<Point2D>& points, const vector<Point2D>& subset)
+void draw_subset (const string& path,
+                  const vector<Point2D>& points,
+                  const vector<Point2D>& subset)
 {
     const int width = 640;
     const int height = 480;
 
     std::function <bool (const Point2D&, const Point2D&)> compare_points_farther =
-        [](const Point2D& first, const Point2D& second) -> bool
+        [] (const Point2D& first, const Point2D& second) -> bool
     {   return std::max (std::abs (first.x), std::abs (first.y)) <
-    std::max (std::abs (second.x), std::abs (second.y));
+               std::max (std::abs (second.x), std::abs (second.y));
     };
 
     auto most_distant_point = std::max_element (points.cbegin (), points.cend (), compare_points_farther);
@@ -378,8 +436,7 @@ void draw_subset (const vector<Point2D>& points, const vector<Point2D>& subset)
     FIBITMAP* bitmap = FreeImage_Allocate (width, height, bits_per_pixel);
 
     if (nullptr == bitmap)
-    {
-        cout << "bitmap creation failed" << endl;
+    {   cout << "bitmap creation failed" << endl;
         return;
     }
 
@@ -413,8 +470,7 @@ void draw_subset (const vector<Point2D>& points, const vector<Point2D>& subset)
     draw_line (bitmap, Point2D (0, center_y), Point2D (width, center_y));
 
     for (const Point2D& point : points)
-    {
-        Point2D frame_point = convert_to_frame_space (point);
+    {   Point2D frame_point = convert_to_frame_space (point);
         RGBQUAD current_color (black_colour);
 
         FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y, &current_color);
@@ -425,8 +481,7 @@ void draw_subset (const vector<Point2D>& points, const vector<Point2D>& subset)
     }
 
     for (const Point2D& point : subset)
-    {
-        Point2D frame_point = convert_to_frame_space (point);
+    {   Point2D frame_point = convert_to_frame_space (point);
         RGBQUAD current_color (red_colour);
 
         FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y, &current_color);
@@ -436,9 +491,87 @@ void draw_subset (const vector<Point2D>& points, const vector<Point2D>& subset)
         FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y + 1, &current_color);
     }
 
-    if (0 == FreeImage_Save (FIF_PNG, bitmap, "C:/projects/parallel/convex_hull/build/Release/hull.png"))
-    {
-        cout << "Saving failed" << endl;
+    if (0 == FreeImage_Save (FIF_PNG, bitmap, path.c_str ()))
+    {   cout << "Saving failed" << endl;
+    }
+    FreeImage_DeInitialise ();
+}
+
+
+
+void draw_enet_computation (string dst, vector<std::pair<Point2D,Point2D>> lines, vector<Point2D> points)
+{
+    const int width = 640;
+    const int height = 480;
+
+    std::function <bool (const Point2D&, const Point2D&)> compare_points_farther =
+        [] (const Point2D& first, const Point2D& second) -> bool
+    {   return std::max (std::abs (first.x), std::abs (first.y)) <
+        std::max (std::abs (second.x), std::abs (second.y));
+    };
+
+    auto most_distant_point = std::max_element (points.cbegin (), points.cend (), compare_points_farther);
+    const double scale = 200 / std::max (std::abs (most_distant_point->x), std::abs (most_distant_point->y));
+    const double center_x = static_cast<double> (width) / 2.0;
+    const double center_y = static_cast<double> (height) / 2.0;
+    const int bits_per_pixel = 24;
+    FreeImage_Initialise ();
+    FIBITMAP* bitmap = FreeImage_Allocate (width, height, bits_per_pixel);
+
+    if (nullptr == bitmap)
+    {   cout << "bitmap creation failed" << endl;
+        return;
+    }
+
+    std::function <Point2D (const Point2D&)> convert_to_frame_space =
+        [scale, center_x, center_y] (const Point2D& point) -> Point2D
+    {   Point2D frame_point;
+        frame_point.x = point.x * scale + center_x;
+        frame_point.y = point.y * scale + center_y;
+        return frame_point;
+    };
+
+    RGBQUAD green_colour;
+    green_colour.rgbRed = 0;
+    green_colour.rgbGreen = 255;
+    green_colour.rgbBlue = 0;
+    RGBQUAD red_colour;
+    red_colour.rgbRed = 255;
+    red_colour.rgbGreen = 0;
+    red_colour.rgbBlue = 0;
+    RGBQUAD white_colour;
+    white_colour.rgbRed = 255;
+    white_colour.rgbGreen = 255;
+    white_colour.rgbBlue = 255;
+    RGBQUAD black_colour;
+    black_colour.rgbRed = 0;
+    black_colour.rgbGreen = 0;
+    black_colour.rgbBlue = 0;
+
+    FreeImage_FillBackground (bitmap, &white_colour);
+    draw_line (bitmap, Point2D (center_x, 0), Point2D (center_x, height));
+    draw_line (bitmap, Point2D (0, center_y), Point2D (width, center_y));
+
+    for (const Point2D& point : points)
+    {   Point2D frame_point = convert_to_frame_space (point);
+        RGBQUAD current_color (black_colour);
+
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x + 1, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x - 1, frame_point.y, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y - 1, &current_color);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y + 1, &current_color);
+    }
+
+    assert (lines.size () > 0);
+    for (const std::pair<Point2D,Point2D>& line : lines)
+    {   Point2D src (convert_to_frame_space (line.first));
+        Point2D dst (convert_to_frame_space (line.second));
+        draw_line (bitmap, src, dst);
+    }
+
+    if (0 == FreeImage_Save (FIF_PNG, bitmap, dst.c_str ()))
+    {   cout << "Saving failed" << endl;
     }
     FreeImage_DeInitialise ();
 }
@@ -450,7 +583,7 @@ void parallel_2d_hull::lead_init (const vector<Point2D>& points) {
     {   whole_pointset_ = points;
         // possible to distribute uniformly
         assert (0 == whole_pointset_.size () % PROCESSORS_AMOUNT_);
-        // input compliant with algorithm slackness 
+        // input compliant with algorithm slackness
         assert (whole_pointset_.size () >= std::pow (PROCESSORS_AMOUNT_, 3));
         subset_cardinality_ = whole_pointset_.size () / PROCESSORS_AMOUNT_;
         LOG_LEAD ("subset_cardinality_ appears to be " << subset_cardinality_);
@@ -477,7 +610,7 @@ void parallel_2d_hull::distribute_input () {
     LOG_ALL ("subset_cardinality_ is " << subset_cardinality_);
     local_subset_.resize (subset_cardinality_);
     bsp_sync();
-    // required for sucessful read
+    // required for successful read
     if (LEAD_PROCESSOR_ID_ != id_)
     {   whole_pointset_.resize (subset_cardinality_ * processors_amount_);
     }
@@ -506,18 +639,15 @@ void parallel_2d_hull::compute_hull () {
     bsp_sync ();
     LOG_LEAD ("Samples computed locally");
     bsp_sync ();
-    // print_local_set
-    // bsp_sync ();
     collect_all_samples (local_samples);
     bsp_sync ();
     LOG_LEAD ("Samples collected");
+    compute_enet (samples_set_);
+    bsp_sync ();
     if (LEAD_PROCESSOR_ID_ == id_)
-    {   draw_subset (whole_pointset_, samples_set_);
+    {   convex_hull = splitters_;
     }
-    //if (LEAD_PROCESSOR_ID_ == id_)
-    //{   vector <Point2D> splitters = compute_enet (samples_set_);
-    //}
-    //bsp_sync ();
+    bsp_sync ();
 }
 
 
@@ -611,6 +741,100 @@ void parallel_2d_hull::collect_all_samples (const vector<Point2D>& local_samples
 
 
 
+vector<triangle> merge_light_triangles (const vector<triangle>& triangles,
+                                        double heaviness_threshold)
+{   vector<triangle> triangles_n_bins;
+    triangle current_bin;
+    for (const triangle& tri : triangles)
+    {   if (current_bin.weight > heaviness_threshold)
+        {   // assert (current_bin.edge.first.x != 0.0 && current_bin.edge.first.y != 0.0);
+            assert (current_bin.edge.second.x != 0.0 && current_bin.edge.second.y != 0.0);
+            triangles_n_bins.push_back (current_bin);
+            current_bin = triangle ();
+        }
+        if (tri.weight > heaviness_threshold)
+        {   triangles_n_bins.push_back (tri);
+        } else if (0 != current_bin.weight)
+        {   current_bin.edge.second = tri.edge.second;
+            current_bin.weight += tri.weight;
+        } else
+        {
+            current_bin = tri;
+        }
+    }
+    return triangles_n_bins;
+}
+
+
+
+vector<Point2D> produce_enet (const vector<triangle>& triangles_n_bins)
+{   std::set<Point2D, compare_points_closer_to_leftmost> enet_set;
+    for (const triangle& tri : triangles_n_bins)
+    {   enet_set.emplace (tri.edge.first);
+        enet_set.emplace (tri.edge.second);
+    }
+    vector<Point2D> enet;
+    std::copy (enet_set.cbegin (), enet_set.cend (), std::back_inserter(enet));
+    return enet;
+}
+
+
+
+void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
+    bsp_sync ();
+    if (LEAD_PROCESSOR_ID_ == id_)
+    {   vector<Point2D> hull = graham_scan (points);
+        Point2D interior_point = find_interior_point (points, hull);
+        if (interior_point.x == -1 &&
+            interior_point.y == -1)
+        {   LOG_LEAD ("No interior point");
+            exit (1);
+        }
+        // traverse triangles
+        vector<Point2D> points_left = find_interior_points (points, hull, interior_point);
+        vector<std::pair<Point2D, Point2D>> lines;
+        vector<triangle> triangles;
+        for (auto hull_edge_start = hull.begin ();
+             hull_edge_start != hull.end ();
+             ++hull_edge_start)
+        {   auto hull_edge_end = hull_edge_start != hull.end () - 1
+                                 ? hull_edge_start + 1
+                                 : hull.begin ();
+            triangle tri;
+            tri.edge = std::make_pair (*hull_edge_start,
+                                       *hull_edge_end);
+            tri.weight = 3;
+
+            lines.push_back (tri.edge);
+            lines.emplace_back (std::make_pair (*hull_edge_start,
+                                                interior_point));
+            for (auto set_point = points_left.begin (); set_point != points_left.end ();)
+            {   if (is_point_inside (*set_point,
+                                     interior_point,
+                                     *hull_edge_start,
+                                     *hull_edge_end))
+                {   ++tri.weight;
+                    set_point = points_left.erase (set_point);
+                } else {
+                    ++set_point;
+                }
+            }
+            triangles.push_back (tri);
+        }
+        double heaviness_threshold = static_cast<double> (points.size ()) /
+                                     static_cast<double> (processors_amount_);
+        vector<triangle> triangles_n_bins = merge_light_triangles (triangles,
+                                                                   heaviness_threshold);
+        splitters_ = produce_enet (triangles_n_bins);
+        // draw_enet_computation ("tri.png", lines, points);
+        draw_subset ("enet.png", whole_pointset_, splitters_);
+        LOG_LEAD ("enet size " << splitters_.size ());
+    }
+    bsp_sync ();
+}
+
+
+
 void compute_2d_hull_with_bsp () {
     bsp_begin (PROCESSORS_AMOUNT_);
     LOG_LEAD ("begin");
@@ -621,10 +845,10 @@ void compute_2d_hull_with_bsp () {
     bsp_sync ();
     computer.compute_hull ();
     // debug request computer.print_local_set ();
-    bsp_sync ();
-    LOG_LEAD ("Computing ... done");
-    bsp_sync ();
-    computer.collect_output (convex_hull);
+    // bsp_sync ();
+    // LOG_LEAD ("Computing ... done");
+    // bsp_sync ();
+    // computer.collect_output (convex_hull);
     bsp_sync ();
     bsp_end ();
 }

@@ -3,6 +3,7 @@
 #define _LOGGER_H__
 
 #include <iostream>
+#include <fstream>
 
 extern "C" {
 #include "mcbsp.h"
@@ -19,11 +20,11 @@ public:
 
     Logger ()
         : mode_ (DEV_LEAD_ONLY | DEV_ALL)
-    {
+    {   stream.open("log.txt", std::ios::app);
     }
 
     std::ostream& get_stream()
-    {   return std::cout;
+    {   return stream; // std::cout;
     }
 
     bool is_allowed (LoggingMode mode)
@@ -32,6 +33,7 @@ public:
 
 private:
     int mode_;
+    std::ofstream stream;
 };
 
 #ifndef NO_LOG
