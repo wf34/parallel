@@ -2,18 +2,27 @@ set (current_project "convex_hull")
 project ("${current_project}")
 cmake_minimum_required(VERSION 2.8)
 
-set (CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+if (NOT WIN32)
+    set (CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+else ()
+    set (CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/win")
+endif ()
+
 set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++11")
+if (WIN32)
+    add_definitions(-DFREEIMAGE_LIB)
+endif ()
 
 find_package (FreeImage REQUIRED)
 
 set (common_directory "${PROJECT_SOURCE_DIR}/../common")
 set (MCBSP_DIR "${PROJECT_SOURCE_DIR}/../MulticoreBSP-for-C")
 set (MCBSP_LIBDIR "${MCBSP_DIR}/lib")
-set (MCBSP_INCDIR "${MCBSP_DIR}/include")
-include_directories ("${MCBSP_INCDIR}" "${common_directory}")
+set (MCBSP_INCDIR "${MCBSP_DIR}")
 
-include_directories ("${PROJECT_SOURCE_DIR}/include"
+include_directories (${MCBSP_INCDIR}
+                     ${common_directory}
+                     "${PROJECT_SOURCE_DIR}/include"
                      ${FreeImage_INCLUDE_DIRS}
                     )
 

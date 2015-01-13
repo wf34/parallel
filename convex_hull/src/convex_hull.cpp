@@ -52,6 +52,10 @@ enum orientation_status {
 
 // To find orientation of ordered triplet (p, q, r).
 orientation_status orientation (const Point2D& p, const Point2D& q, const Point2D& r);
+// true, if the given point lies in the opposite halfspace from apex
+bool is_point_in_halfpace (const Point2D& point,
+                           const std::pair<Point2D, Point2D>& halfspace_line,
+                           const Point2D& apex);
 
 // A utility function to return square of distance between p1 and p2
 double dist (const Point2D& first, const Point2D& second);
@@ -104,17 +108,36 @@ public:
 
 private:
     vector<Point2D> compute_local_samples ();
-    void compute_enet (const vector<Point2D>& points);
     void collect_all_samples (const vector<Point2D>& local_data);
+    void communicate_interior_point ();
+    void compute_enet (const vector<Point2D>& points);
+
+    // distributes local hull points to corresponding buckets;
+    // buckets distribution is trivial
+    // bucket is a splitter polygon vertex. bucket defined by 2 half-planes
+    // i-th processor in [0, p) is in charge 
+    // of 2 consecutive buckets from [0, 2p): 2*i and 2*i+1.
+    void distribute_over_buckets ();
+    bool does_point_fall_into_bucket (const Point2D& point,
+                                      vector<Point2D>::const_iterator bucket );
 
     int id_;
     int processors_amount_;
     int subset_cardinality_;
+    static const int halfplane_coefficient_;
+    static const int buckets_per_proc_;
 
     vector <Point2D> whole_pointset_; // exists only on LEAD
     vector <Point2D> local_subset_;
+    vector <Point2D> local_hull_;
     vector <Point2D> samples_set_; // exists only on LEAD
-    vector <Point2D> splitters_; // exists only on LEAD
+    vector <Point2D> splitters_;
+
+    // required for checking bucket residence
+    Point2D interior_point_;
+
+    vector <Point2D> bucket_0;
+    vector <Point2D> bucket_1;
 };
 
 struct triangle {
@@ -136,6 +159,9 @@ vector<Point2D> convex_hull;
 void compute_2d_hull_with_bsp ();
 
 /////////////////////////////////////////////////////////////////////////////
+
+const int parallel_2d_hull::halfplane_coefficient_ = 4;
+const int parallel_2d_hull::buckets_per_proc_ = 2;
 
 triangle::triangle ()
     : weight (0.0) 
@@ -250,6 +276,22 @@ orientation_status orientation (const Point2D& p, const Point2D& q, const Point2
 
     return (val > 0.0) ? COUNTER_CLOCKWISE : CLOCKWISE;
 }
+
+
+
+bool is_point_in_halfpace (const Point2D& point,
+                           const std::pair<Point2D, Point2D>& halfspace_line,
+                           const Point2D& apex)
+{
+    bool with_apex = CLOCKWISE == orientation (halfspace_line.first,
+                                               halfspace_line.second,
+                                               apex);
+    bool with_point = CLOCKWISE == orientation (halfspace_line.first,
+                                                halfspace_line.second,
+                                                point);
+    return with_apex !=with_point;
+}
+
 
 
 bool is_point_inside (const Point2D& p,
@@ -648,6 +690,7 @@ void parallel_2d_hull::compute_hull () {
     {   convex_hull = splitters_;
     }
     bsp_sync ();
+    distribute_over_buckets ();
 }
 
 
@@ -695,24 +738,24 @@ void parallel_2d_hull::print_local_set (const vector<Point2D>& data)
 
 
 vector<Point2D> parallel_2d_hull::compute_local_samples () {
-    vector<Point2D> local_hull = graham_scan (local_subset_);
+    local_hull_ = graham_scan (local_subset_);
     bsp_sync ();
     LOG_LEAD ("Graham scan done");
     bsp_sync ();
-    if (local_hull.size () <= processors_amount_)
-    {   assert (local_hull.size () == processors_amount_);
+    if (local_hull_.size () <= processors_amount_)
+    {   assert (local_hull_.size () == processors_amount_);
         // not implemented case when local_hull.size () < p
-        return local_hull;
+        return local_hull_;
     } else
     {   // samples from local hull with regular step such that card (samples) = p
         vector<Point2D> samples;
-        samples.reserve (local_hull.size ()); 
-        double step = static_cast<double> (local_hull.size () - 1) /
+        samples.reserve (local_hull_.size ()); 
+        double step = static_cast<double> (local_hull_.size () - 1) /
                       static_cast<double> (processors_amount_ - 1);
         for (int i = 0; i < processors_amount_; ++i)
         {   int index = std::floor (i * step + 0.5);
-            assert (index < local_hull.size ());
-            samples.emplace_back (local_hull.at (index));
+            assert (index < local_hull_.size ());
+            samples.emplace_back (local_hull_.at (index));
         }
         return samples;
     }
@@ -780,18 +823,36 @@ vector<Point2D> produce_enet (const vector<triangle>& triangles_n_bins)
 
 
 
+void parallel_2d_hull::communicate_interior_point () {
+    bsp_push_reg (&interior_point_, sizeof (Point2D));
+    bsp_sync ();
+    if (LEAD_PROCESSOR_ID_ != id_)
+    {   bsp_get (LEAD_PROCESSOR_ID_,
+                 &interior_point_,
+                 0,
+                 &interior_point_,
+                 sizeof (Point2D));
+    }
+    bsp_sync ();
+    bsp_pop_reg (&interior_point_);
+    bsp_sync ();
+}
+
+
+
 void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
     bsp_sync ();
+    splitters_.resize (2 * processors_amount_);
     if (LEAD_PROCESSOR_ID_ == id_)
     {   vector<Point2D> hull = graham_scan (points);
-        Point2D interior_point = find_interior_point (points, hull);
-        if (interior_point.x == -1 &&
-            interior_point.y == -1)
+        interior_point_ = find_interior_point (points, hull);
+        if (interior_point_.x == -1 &&
+            interior_point_.y == -1)
         {   LOG_LEAD ("No interior point");
             exit (1);
         }
         // traverse triangles
-        vector<Point2D> points_left = find_interior_points (points, hull, interior_point);
+        vector<Point2D> points_left = find_interior_points (points, hull, interior_point_);
         vector<std::pair<Point2D, Point2D>> lines;
         vector<triangle> triangles;
         for (auto hull_edge_start = hull.begin ();
@@ -807,10 +868,10 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
 
             lines.push_back (tri.edge);
             lines.emplace_back (std::make_pair (*hull_edge_start,
-                                                interior_point));
+                                                interior_point_));
             for (auto set_point = points_left.begin (); set_point != points_left.end ();)
             {   if (is_point_inside (*set_point,
-                                     interior_point,
+                                     interior_point_,
                                      *hull_edge_start,
                                      *hull_edge_end))
                 {   ++tri.weight;
@@ -826,11 +887,65 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
         vector<triangle> triangles_n_bins = merge_light_triangles (triangles,
                                                                    heaviness_threshold);
         splitters_ = produce_enet (triangles_n_bins);
+        splitters_.resize (2 * processors_amount_, {-1,-1});
         // draw_enet_computation ("tri.png", lines, points);
-        draw_subset ("enet.png", whole_pointset_, splitters_);
+        // draw_subset ("enet.png", whole_pointset_, splitters_);
         LOG_LEAD ("enet size " << splitters_.size ());
     }
     bsp_sync ();
+    communicate_interior_point ();
+    // communicate splitters
+    bsp_push_reg (splitters_.data (), 2 * processors_amount_ * sizeof (Point2D));
+    bsp_sync ();
+    if (LEAD_PROCESSOR_ID_ != id_)
+    {   bsp_get (LEAD_PROCESSOR_ID_,
+                 splitters_.data (),
+                 0,
+                 splitters_.data (),
+                 2 * processors_amount_ * sizeof (Point2D));
+    }
+    bsp_sync ();
+    bsp_pop_reg (splitters_.data ());
+    LOG_ALL ("Splitters instance size is " << splitters_.size ());
+    bsp_sync ();
+}
+
+
+
+void parallel_2d_hull::distribute_over_buckets () {
+    int bucket_size = subset_cardinality_ * halfplane_coefficient_;
+    bucket_0.resize (bucket_size * processors_amount_, {-1,-1});
+    bucket_1.resize (bucket_size * processors_amount_, {-1,-1});
+
+    // iterate over local hull and send every point to the appropriate bucket
+    vector<vector <Point2D>> temp_container_for_bucket_entries;
+    temp_container_for_bucket_entries.resize (buckets_per_proc_ *
+                                              processors_amount_);
+    for (const Point2D& local_hull_point : local_hull_)
+    {   for (auto bucket_iter = splitters_.cbegin();
+             bucket_iter != splitters_.end ();
+             ++bucket_iter)
+        {   if (does_point_fall_into_bucket (local_hull_point, bucket_iter))
+             {   int bucket_index =
+                     std::distance<std::vector<Point2D>::const_iterator> (splitters_.cbegin (),
+                                                                          bucket_iter);
+                 temp_container_for_bucket_entries.at (bucket_index).emplace_back (local_hull_point);
+             }
+        }
+    }
+}
+
+
+
+bool parallel_2d_hull::does_point_fall_into_bucket (const Point2D& point,
+                                                    vector<Point2D>::const_iterator bucket) {
+    auto first_line = std::make_pair <Point2D, Point2D> (static_cast<Point2D>(*std::prev (bucket)),
+                                                         static_cast<Point2D>(*bucket));
+    auto second_line = std::make_pair <Point2D, Point2D> (static_cast<Point2D>(*bucket),
+                                                          static_cast<Point2D>(*std::next (bucket)));
+    bool is_in_first_halfspace = is_point_in_halfpace (point, first_line, interior_point_);
+    bool is_in_second_halfspace = is_point_in_halfpace (point, second_line, interior_point_);
+    return is_in_first_halfspace || is_in_second_halfspace;
 }
 
 
