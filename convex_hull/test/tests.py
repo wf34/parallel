@@ -24,6 +24,9 @@ def deserialize_cycle (serialized_cycle):
 
 
 def compare_cycles (cycle_string_first, cycle_string_second):
+    print cycle_string_first
+    print "/////////////////"
+    print cycle_string_second
     cycle_first = deserialize_cycle (cycle_string_first)
     cycle_second = deserialize_cycle (cycle_string_second)
 
@@ -39,7 +42,7 @@ def compare_cycles (cycle_string_first, cycle_string_second):
 
 def hull_test (seed):
     seeding_argument = 't' + str(seed)
-    rbox_process = Popen (['rbox', '10', 'D2', seeding_argument], stdout = PIPE, shell = True)
+    rbox_process = Popen (['rbox', '64', 'D2', seeding_argument], stdout = PIPE, shell = True)
     problem = rbox_process.communicate ()
     # print "==========\n", problem[0], "==========\n"
 
@@ -53,8 +56,10 @@ def hull_test (seed):
 
     if (compare_cycles (qhull_output, convex_hull_output)):
         print "test passed"
+        return True
     else:
         print "test failed"
+        return False
 
 
 def is_enet_valid (set, enet):
@@ -97,8 +102,9 @@ def testing ():
 
     for x in range (10):
         print "*** TEST", x, "**********"
-        #hull_test (random_seeds[x])
-        check_enet (random_seeds[x])
+        if not hull_test (random_seeds[x]):
+            break
+        #check_enet (random_seeds[x])
 
 
 

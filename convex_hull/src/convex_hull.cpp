@@ -26,7 +26,9 @@ using std::vector;
 
 struct Point2D {
     Point2D ();Point2D (double x, double y);
-    bool operator < (const Point2D& b);
+    bool operator < (const Point2D& b) const;
+    bool operator == (const Point2D& b) const;
+    bool operator != (const Point2D& b) const;
 
     double x;
     double y;
@@ -39,8 +41,16 @@ vector<Point2D> graham_scan (vector<Point2D> points);
 // triangles association (by CS341, pp.125)
 vector<Point2D> compute_enet (const vector<Point2D>& points);
 
-void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull);
-void draw_subset (const string& path, const vector<Point2D>& points, const vector<Point2D>& subset);
+void draw_hull (const string& path,
+                const vector<Point2D>& points,
+                const vector<Point2D>& hull);
+
+void draw_subset (const string& path,
+                  const vector<Point2D>& points,
+                  const vector<Point2D>& subset,
+                  const Point2D& apex = {-1, -1},
+                  const vector<std::pair<Point2D, Point2D>>& lines =
+                  vector<std::pair<Point2D, Point2D>> ());
 void draw_line (FIBITMAP* bitmap, const Point2D& src, const Point2D& dst);
 
 enum orientation_status {
@@ -119,7 +129,8 @@ private:
     // of 2 consecutive buckets from [0, 2p): 2*i and 2*i+1.
     void distribute_over_buckets ();
     bool does_point_fall_into_bucket (const Point2D& point,
-                                      vector<Point2D>::const_iterator bucket );
+                                      vector<Point2D>::const_iterator bucket);
+    void accumuate_buckets ();
 
     int id_;
     int processors_amount_;
@@ -132,6 +143,8 @@ private:
     vector <Point2D> local_hull_;
     vector <Point2D> samples_set_; // exists only on LEAD
     vector <Point2D> splitters_;
+
+    vector <Point2D> buckets_; // exists only on LEAD
 
     // required for checking bucket residence
     Point2D interior_point_;
@@ -148,7 +161,12 @@ struct triangle {
 
 vector<triangle> merge_light_triangles (const vector<triangle>& triangles,
                                         double heaviness_threshold);
-vector<Point2D> produce_enet (const vector<triangle>& triangles_n_bins);
+vector<Point2D> extract_hull_points_from_tringles (const vector<triangle>& triangles_n_bins);
+
+std::pair<Point2D, Point2D> generate_line_prev (const vector<Point2D>::const_iterator& bucket,
+                                                const vector<Point2D>& splitters);
+std::pair<Point2D, Point2D> generate_line_next (const vector<Point2D>::const_iterator& bucket,
+                                                const vector<Point2D>& splitters);
 
 const int PROCESSORS_AMOUNT_ = 4;
 const int LEAD_PROCESSOR_ID_ = 0;
@@ -182,10 +200,23 @@ Point2D::Point2D (double x, double y)
 
 
 
-bool Point2D::operator < (const Point2D& b) {
+bool Point2D::operator < (const Point2D& b) const {
     if (y != b.y)
         return y < b.y;
     return x < b.x;
+}
+
+
+
+bool Point2D::operator == (const Point2D& b) const {
+    return std::fabs (x - b.x) < 1e-9 &&
+           std::fabs (y - b.y) < 1e-9;
+}
+
+
+
+bool Point2D::operator != (const Point2D& b) const {
+    return !(*this == b);
 }
 
 
@@ -294,6 +325,12 @@ bool is_point_in_halfpace (const Point2D& point,
 
 
 
+bool is_point_invalid (const Point2D& p) {
+    return p.x == -1.0 && p.y == -1.0;
+}
+
+
+
 bool is_point_inside (const Point2D& p,
                       const Point2D& a,
                       const Point2D& b,
@@ -362,7 +399,6 @@ void draw_line (FIBITMAP* bitmap, const Point2D& src, const Point2D& dst)
     if (left.x > right.x)
     {   std::swap (left, right);
     }
-
     RGBQUAD red_colour;
     red_colour.rgbRed = 255;
     red_colour.rgbGreen = 0;
@@ -375,10 +411,15 @@ void draw_line (FIBITMAP* bitmap, const Point2D& src, const Point2D& dst)
             std::floor (left.x + x_step * static_cast<double> (i)+0.5),
             std::floor (left.y + y_step * static_cast<double> (i)+0.5),
             &red_colour);
+        
     }
 }
 
-void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull) {
+
+
+void draw_hull (const string& path,
+                const vector<Point2D>& points,
+                const vector<Point2D>& hull) {
     const int width = 640;
     const int height = 480;
     
@@ -428,7 +469,10 @@ void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull) {
 
     for (vector<Point2D>::const_iterator point = hull.cbegin ();
          point != hull.cend (); ++point)
-    {   auto prev_point = (point == hull.cbegin ()) ? hull.cend () - 1 : point - 1;
+    {   auto prev_point = (point == hull.cbegin ())
+                          ? std::prev (hull.cend ())
+                          : std::prev (point);
+
         Point2D prev_frame_point = convert_to_frame_space (*prev_point);
         Point2D frame_point = convert_to_frame_space (*point);
         draw_line (bitmap, prev_frame_point, frame_point);
@@ -437,8 +481,8 @@ void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull) {
     for (const Point2D& point : points)
     {   Point2D frame_point = convert_to_frame_space (point);
         RGBQUAD current_color (black_colour);
-        if (point.x == points.front ().x &&
-            point.y == points.front ().y)
+        if (point.x == hull.front ().x &&
+            point.y == hull.front ().y)
         {   current_color = green_colour;
         }
 
@@ -449,7 +493,7 @@ void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull) {
         FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y + 1, &current_color);
     }
 
-    if (0 == FreeImage_Save (FIF_PNG, bitmap, "C:/projects/parallel/convex_hull/build/Release/hull.png"))
+    if (0 == FreeImage_Save (FIF_PNG, bitmap, path.c_str ()))
     {   cout << "Saving failed" << endl;
     }
     FreeImage_DeInitialise ();
@@ -458,7 +502,9 @@ void draw_hull (const vector<Point2D>& points, const vector<Point2D>& hull) {
 
 void draw_subset (const string& path,
                   const vector<Point2D>& points,
-                  const vector<Point2D>& subset)
+                  const vector<Point2D>& subset,
+                  const Point2D& apex,
+                  const vector<std::pair<Point2D,Point2D>>& lines)
 {
     const int width = 640;
     const int height = 480;
@@ -514,7 +560,6 @@ void draw_subset (const string& path,
     for (const Point2D& point : points)
     {   Point2D frame_point = convert_to_frame_space (point);
         RGBQUAD current_color (black_colour);
-
         FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y, &current_color);
         FreeImage_SetPixelColor (bitmap, frame_point.x + 1, frame_point.y, &current_color);
         FreeImage_SetPixelColor (bitmap, frame_point.x - 1, frame_point.y, &current_color);
@@ -522,15 +567,33 @@ void draw_subset (const string& path,
         FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y + 1, &current_color);
     }
 
+    if (!is_point_invalid (apex))
+    {
+        Point2D frame_point = convert_to_frame_space (apex);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y, &green_colour);
+        FreeImage_SetPixelColor (bitmap, frame_point.x + 1, frame_point.y, &green_colour);
+        FreeImage_SetPixelColor (bitmap, frame_point.x - 1, frame_point.y, &green_colour);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y - 1, &green_colour);
+        FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y + 1, &green_colour);
+    }
+
     for (const Point2D& point : subset)
     {   Point2D frame_point = convert_to_frame_space (point);
         RGBQUAD current_color (red_colour);
-
         FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y, &current_color);
         FreeImage_SetPixelColor (bitmap, frame_point.x + 1, frame_point.y, &current_color);
         FreeImage_SetPixelColor (bitmap, frame_point.x - 1, frame_point.y, &current_color);
         FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y - 1, &current_color);
         FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y + 1, &current_color);
+    }
+
+    for (auto line : lines)
+    {   if (!is_point_invalid (line.first) &&
+            !is_point_invalid (line.second))
+        {   draw_line (bitmap, 
+                       convert_to_frame_space (line.first),
+                       convert_to_frame_space (line.second));
+        }
     }
 
     if (0 == FreeImage_Save (FIF_PNG, bitmap, path.c_str ()))
@@ -685,12 +748,14 @@ void parallel_2d_hull::compute_hull () {
     bsp_sync ();
     LOG_LEAD ("Samples collected");
     compute_enet (samples_set_);
-    bsp_sync ();
-    if (LEAD_PROCESSOR_ID_ == id_)
-    {   convex_hull = splitters_;
-    }
+    // bsp_sync ();
+    // if (LEAD_PROCESSOR_ID_ == id_)
+    // {   convex_hull = splitters_;
+    // }
     bsp_sync ();
     distribute_over_buckets ();
+    // simplified routine
+    accumuate_buckets ();
 }
 
 
@@ -786,11 +851,13 @@ void parallel_2d_hull::collect_all_samples (const vector<Point2D>& local_samples
 
 vector<triangle> merge_light_triangles (const vector<triangle>& triangles,
                                         double heaviness_threshold)
-{   vector<triangle> triangles_n_bins;
+{
+#pragma message ("maybe buggish implementation, investigate later")
+    vector<triangle> triangles_n_bins;
     triangle current_bin;
     for (const triangle& tri : triangles)
     {   if (current_bin.weight > heaviness_threshold)
-        {   // assert (current_bin.edge.first.x != 0.0 && current_bin.edge.first.y != 0.0);
+        {   assert (current_bin.edge.first.x != 0.0 && current_bin.edge.first.y != 0.0);
             assert (current_bin.edge.second.x != 0.0 && current_bin.edge.second.y != 0.0);
             triangles_n_bins.push_back (current_bin);
             current_bin = triangle ();
@@ -810,15 +877,21 @@ vector<triangle> merge_light_triangles (const vector<triangle>& triangles,
 
 
 
-vector<Point2D> produce_enet (const vector<triangle>& triangles_n_bins)
-{   std::set<Point2D, compare_points_closer_to_leftmost> enet_set;
-    for (const triangle& tri : triangles_n_bins)
-    {   enet_set.emplace (tri.edge.first);
-        enet_set.emplace (tri.edge.second);
+vector<Point2D> extract_hull_points_from_tringles (const vector<triangle>& triangles_n_bins)
+{   auto non_duplicating_push_back =
+        [] (const Point2D& p, vector<Point2D>& points) -> void
+    {   if (points.empty () ||
+            points.back () != p)
+        {   points.push_back (p);
+        }
+    };
+
+    vector<Point2D> hull_points;
+    for (auto tri : triangles_n_bins)
+    {   non_duplicating_push_back (tri.edge.first, hull_points);
+        non_duplicating_push_back (tri.edge.second, hull_points);
     }
-    vector<Point2D> enet;
-    std::copy (enet_set.cbegin (), enet_set.cend (), std::back_inserter(enet));
-    return enet;
+    return hull_points;
 }
 
 
@@ -843,8 +916,11 @@ void parallel_2d_hull::communicate_interior_point () {
 void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
     bsp_sync ();
     splitters_.resize (2 * processors_amount_);
+    // local computation on lead processor,
+    // procedure from CS431, pp. 125
     if (LEAD_PROCESSOR_ID_ == id_)
     {   vector<Point2D> hull = graham_scan (points);
+        draw_hull ("hull_from_samples.png", points, hull);
         interior_point_ = find_interior_point (points, hull);
         if (interior_point_.x == -1 &&
             interior_point_.y == -1)
@@ -862,14 +938,15 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
                                  ? hull_edge_start + 1
                                  : hull.begin ();
             triangle tri;
+            tri.weight = 3;
             tri.edge = std::make_pair (*hull_edge_start,
                                        *hull_edge_end);
-            tri.weight = 3;
 
             lines.push_back (tri.edge);
             lines.emplace_back (std::make_pair (*hull_edge_start,
                                                 interior_point_));
-            for (auto set_point = points_left.begin (); set_point != points_left.end ();)
+            for (auto set_point = points_left.begin ();
+                 set_point != points_left.end ();)
             {   if (is_point_inside (*set_point,
                                      interior_point_,
                                      *hull_edge_start,
@@ -886,7 +963,17 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
                                      static_cast<double> (processors_amount_);
         vector<triangle> triangles_n_bins = merge_light_triangles (triangles,
                                                                    heaviness_threshold);
-        splitters_ = produce_enet (triangles_n_bins);
+        /////
+        // vector <Point2D> merged;
+        // for (auto tri : triangles_n_bins)
+        // {   merged.push_back (tri.edge.first);
+        //     merged.push_back (tri.edge.second);
+        // }
+        // draw_hull ("pre_enet.png", points, hull);
+        // LOG_LEAD ("pre enet size " << hull.size ());
+        /////
+
+        splitters_ = extract_hull_points_from_tringles (triangles_n_bins);
         splitters_.resize (2 * processors_amount_, {-1,-1});
         // draw_enet_computation ("tri.png", lines, points);
         // draw_subset ("enet.png", whole_pointset_, splitters_);
@@ -906,6 +993,7 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
     }
     bsp_sync ();
     bsp_pop_reg (splitters_.data ());
+    splitters_.erase (std::remove_if (splitters_.begin (), splitters_.end (), is_point_invalid), splitters_.end ());
     LOG_ALL ("Splitters instance size is " << splitters_.size ());
     bsp_sync ();
 }
@@ -918,20 +1006,110 @@ void parallel_2d_hull::distribute_over_buckets () {
     bucket_1.resize (bucket_size * processors_amount_, {-1,-1});
 
     // iterate over local hull and send every point to the appropriate bucket
-    vector<vector <Point2D>> temp_container_for_bucket_entries;
-    temp_container_for_bucket_entries.resize (buckets_per_proc_ *
+    vector<vector <Point2D>> bucket_entries;
+    bucket_entries.resize (buckets_per_proc_ *
                                               processors_amount_);
     for (const Point2D& local_hull_point : local_hull_)
     {   for (auto bucket_iter = splitters_.cbegin();
-             bucket_iter != splitters_.end ();
+             bucket_iter != splitters_.cend ();
              ++bucket_iter)
         {   if (does_point_fall_into_bucket (local_hull_point, bucket_iter))
-             {   int bucket_index =
-                     std::distance<std::vector<Point2D>::const_iterator> (splitters_.cbegin (),
-                                                                          bucket_iter);
-                 temp_container_for_bucket_entries.at (bucket_index).emplace_back (local_hull_point);
-             }
+            {   int bucket_index =
+                    std::distance<std::vector<Point2D>::const_iterator> (splitters_.cbegin (),
+                                                                         bucket_iter);
+                bucket_entries.at (bucket_index).emplace_back (local_hull_point);
+                break;
+            }
         }
+    }
+    bsp_sync ();
+    bsp_push_reg (bucket_0.data (), bucket_0.size () * sizeof (Point2D));
+    bsp_push_reg (bucket_1.data (), bucket_1.size () * sizeof (Point2D));
+    bsp_sync ();
+    for (int bucket_index = 0;
+         bucket_index < bucket_entries.size ();
+         ++bucket_index)
+    {   int designated_proc = bucket_index / 2;
+        void* destination = (0 == bucket_index % 2)
+                            ? bucket_0.data ()
+                            : bucket_1.data ();
+        bsp_put (designated_proc,
+                 bucket_entries.at (bucket_index).data (),
+                 destination,
+                 bucket_size * id_,
+                 bucket_entries.at (bucket_index).size () * sizeof (Point2D));
+    }
+    bsp_sync ();
+    bsp_pop_reg (bucket_0.data ());
+    bsp_pop_reg (bucket_1.data ());
+    bsp_sync ();
+    //bucket_0.erase (std::remove_if (bucket_0.begin (), bucket_0.end (), is_point_invalid), bucket_0.end ());
+    //bucket_1.erase (std::remove_if (bucket_1.begin (), bucket_1.end (), is_point_invalid), bucket_1.end ());
+    //bsp_sync ();
+    ///////////////
+    //bsp_push_reg (whole_pointset_.data (), whole_pointset_.size () * sizeof (Point2D));
+    //bsp_sync ();
+    //if (1 ==id_)
+    //{   bsp_get (LEAD_PROCESSOR_ID_,
+    //             whole_pointset_.data (),
+    //             0,
+    //             whole_pointset_.data (),
+    //             whole_pointset_.size () * sizeof (Point2D));
+    //}
+    //
+    //bsp_sync ();
+    //bsp_pop_reg (whole_pointset_.data ());
+    //bsp_sync ();
+    ///////////////
+    // for (int i = 0; i < processors_amount_; ++i)
+    // {
+    //     if (i == id_)
+    //     {   if (0 == i)
+    //         {   vector<std::pair<Point2D, Point2D>> lines =
+    //             {generate_line_prev(splitters_.cbegin (), splitters_),
+    //              generate_line_next(splitters_.cbegin (), splitters_)};
+    //             draw_subset ("bucket_0.png", whole_pointset_, bucket_0,
+    //                          interior_point_, lines);
+    //             draw_hull ("splitters.png", whole_pointset_, splitters_);
+    //         }
+    //         assert (bucket_0.size () < bucket_size);
+    //         assert (bucket_1.size () < bucket_size);
+    //         LOG_ALL ("bucket 0");
+    //         for (auto p : bucket_0)
+    //         { LOG_ALL (p);
+    //         }
+    //         LOG_ALL ("bucket 1");
+    //         for (auto p : bucket_1)
+    //         {   LOG_ALL (p);
+    //         }
+    //     }
+    //     bsp_sync ();
+    // }
+}
+
+
+
+std::pair<Point2D, Point2D> generate_line_prev (const vector<Point2D>::const_iterator& bucket,
+                                           const vector<Point2D>& splitters)
+{   if (bucket == splitters.cbegin ())
+    {   return std::make_pair<Point2D, Point2D> (static_cast<Point2D> (splitters.back ()),
+                                                 static_cast<Point2D> (*bucket));
+    } else
+    {   return std::make_pair <Point2D, Point2D> (static_cast<Point2D>(*std::prev (bucket)),
+                                                  static_cast<Point2D>(*bucket));
+    }
+}
+
+
+
+std::pair<Point2D, Point2D> generate_line_next (const vector<Point2D>::const_iterator& bucket,
+                                                const vector<Point2D>& splitters)
+{   if (bucket == splitters.cend () - 1)
+    {    return std::make_pair<Point2D, Point2D> (static_cast<Point2D> (*bucket),
+                                                  static_cast<Point2D> (splitters.front ()));
+    } else
+    {   return std::make_pair <Point2D, Point2D> (static_cast<Point2D>(*bucket),
+                                                  static_cast<Point2D>(*std::next (bucket)));
     }
 }
 
@@ -939,13 +1117,51 @@ void parallel_2d_hull::distribute_over_buckets () {
 
 bool parallel_2d_hull::does_point_fall_into_bucket (const Point2D& point,
                                                     vector<Point2D>::const_iterator bucket) {
-    auto first_line = std::make_pair <Point2D, Point2D> (static_cast<Point2D>(*std::prev (bucket)),
-                                                         static_cast<Point2D>(*bucket));
-    auto second_line = std::make_pair <Point2D, Point2D> (static_cast<Point2D>(*bucket),
-                                                          static_cast<Point2D>(*std::next (bucket)));
+    auto first_line = generate_line_prev (bucket, splitters_);
+    auto second_line = generate_line_next (bucket, splitters_);
+
     bool is_in_first_halfspace = is_point_in_halfpace (point, first_line, interior_point_);
     bool is_in_second_halfspace = is_point_in_halfpace (point, second_line, interior_point_);
     return is_in_first_halfspace || is_in_second_halfspace;
+}
+
+
+
+void parallel_2d_hull::accumuate_buckets () {
+    int bucket_size = bucket_0.size ();
+    bsp_push_reg (bucket_0.data (), bucket_size * sizeof (Point2D));
+    bsp_push_reg (bucket_1.data (), bucket_size * sizeof (Point2D));
+    bsp_sync ();
+    if (LEAD_PROCESSOR_ID_ == id_)
+    {   buckets_.resize (bucket_0.size () *
+                         processors_amount_ *
+                         buckets_per_proc_ *
+                         sizeof (Point2D));
+        for (int i = 0; i < processors_amount_; ++i)
+        {   bsp_get (i,
+                     bucket_0.data (),
+                     0,
+                     buckets_.data () + 2 * i * bucket_size * sizeof (Point2D),
+                     bucket_size * sizeof (Point2D));
+            bsp_get (i,
+                bucket_1.data (),
+                0,
+                buckets_.data () + (2 * i + 1) * bucket_size * sizeof (Point2D),
+                bucket_size * sizeof (Point2D));
+        }
+    }
+    bsp_sync ();
+    bsp_pop_reg (bucket_0.data ());
+    bsp_pop_reg (bucket_1.data ());
+    bsp_sync ();
+    if (LEAD_PROCESSOR_ID_ == id_)
+    {   buckets_.erase (std::remove_if (buckets_.begin (), buckets_.end (), is_point_invalid), buckets_.end ());
+        std::copy (splitters_.cbegin (), splitters_.cend (), std::back_inserter (buckets_));
+        draw_subset ("buckets.png", whole_pointset_, buckets_);
+        convex_hull = graham_scan (buckets_);
+        draw_hull ("final_hull.png", whole_pointset_, convex_hull);
+    }
+    bsp_sync ();
 }
 
 
