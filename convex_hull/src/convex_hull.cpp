@@ -331,10 +331,10 @@ bool is_point_invalid (const Point2D& p) {
 
 
 
-bool is_point_inside (const Point2D& p,
-                      const Point2D& a,
-                      const Point2D& b,
-                      const Point2D& c) {
+bool is_point_inside_triangle (const Point2D& p,
+                               const Point2D& a,
+                               const Point2D& b,
+                               const Point2D& c) {
     bool with_edge_ab, with_edge_bc, with_edge_ca;
     with_edge_ab = CLOCKWISE == orientation (p, a, b);
     with_edge_bc = CLOCKWISE == orientation (p, b, c);
@@ -920,7 +920,7 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
     // procedure from CS431, pp. 125
     if (LEAD_PROCESSOR_ID_ == id_)
     {   vector<Point2D> hull = graham_scan (points);
-        draw_hull ("hull_from_samples.png", points, hull);
+        draw_hull ("hull_from_samples.png", whole_pointset_, hull);
         interior_point_ = find_interior_point (points, hull);
         if (interior_point_.x == -1 &&
             interior_point_.y == -1)
@@ -947,10 +947,10 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
                                                 interior_point_));
             for (auto set_point = points_left.begin ();
                  set_point != points_left.end ();)
-            {   if (is_point_inside (*set_point,
-                                     interior_point_,
-                                     *hull_edge_start,
-                                     *hull_edge_end))
+            {   if (is_point_inside_triangle (*set_point,
+                                              interior_point_,
+                                              *hull_edge_start,
+                                              *hull_edge_end))
                 {   ++tri.weight;
                     set_point = points_left.erase (set_point);
                 } else {
@@ -1043,9 +1043,11 @@ void parallel_2d_hull::distribute_over_buckets () {
     bsp_pop_reg (bucket_0.data ());
     bsp_pop_reg (bucket_1.data ());
     bsp_sync ();
-    //bucket_0.erase (std::remove_if (bucket_0.begin (), bucket_0.end (), is_point_invalid), bucket_0.end ());
-    //bucket_1.erase (std::remove_if (bucket_1.begin (), bucket_1.end (), is_point_invalid), bucket_1.end ());
-    //bsp_sync ();
+    ///////////////
+    ///////////////
+    // bucket_0.erase (std::remove_if (bucket_0.begin (), bucket_0.end (), is_point_invalid), bucket_0.end ());
+    // bucket_1.erase (std::remove_if (bucket_1.begin (), bucket_1.end (), is_point_invalid), bucket_1.end ());
+    // bsp_sync ();
     ///////////////
     //bsp_push_reg (whole_pointset_.data (), whole_pointset_.size () * sizeof (Point2D));
     //bsp_sync ();

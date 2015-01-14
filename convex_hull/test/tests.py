@@ -19,15 +19,15 @@ def deserialize_cycle (serialized_cycle):
         choordinates = line.split(" ")
         cycle.append ((float (choordinates[0]), float (choordinates[1])))
     cycle = sorted (cycle, key = lambda choord : choord[0])
+    for x in cycle:
+        print x
     return cycle
 
 
 
 def compare_cycles (cycle_string_first, cycle_string_second):
-    print cycle_string_first
-    print "/////////////////"
-    print cycle_string_second
     cycle_first = deserialize_cycle (cycle_string_first)
+    print "/////////////////"
     cycle_second = deserialize_cycle (cycle_string_second)
 
     if (len (cycle_first) != len (cycle_second)):
@@ -42,6 +42,7 @@ def compare_cycles (cycle_string_first, cycle_string_second):
 
 def hull_test (seed):
     seeding_argument = 't' + str(seed)
+    print "seed was", seeding_argument
     rbox_process = Popen (['rbox', '64', 'D2', seeding_argument], stdout = PIPE, shell = True)
     problem = rbox_process.communicate ()
     # print "==========\n", problem[0], "==========\n"
