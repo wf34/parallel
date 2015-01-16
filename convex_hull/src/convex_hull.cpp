@@ -1258,6 +1258,7 @@ void compute_2d_hull_with_bsp () {
 
 int main (int argc, char ** argv) {
     points = read_points ();
+    draw_subset ("plain.points.png", points, vector<Point2D> ());
     bsp_init( compute_2d_hull_with_bsp, argc, argv );
     compute_2d_hull_with_bsp ();
     write_points (convex_hull);

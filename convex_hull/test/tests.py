@@ -1,14 +1,20 @@
 import os
 import subprocess
 from subprocess import Popen, PIPE, STDOUT
+import time
 
 convex_hull_app_ = \
     ("C:/projects/parallel/convex_hull/build/Release/convex_hull.exe" \
     if (os.name == "nt") else \
         "/home/wf34/projects/parallel/convex_hull/build/convex_hull")
+normal_rbox_app_ = \
+    ("C:/projects/parallel/convex_hull/build/Release/normal_rbox.exe" \
+    if (os.name == "nt") else \
+        "/home/wf34/projects/parallel/convex_hull/build/normal_rbox")
 allowed_error_ = float (1e-9)
 
-
+qhull_time_ = 0
+chull_time_ = 0
 
 def deserialize_cycle (serialized_cycle):
     lines = serialized_cycle.split("\n")
@@ -41,18 +47,26 @@ def compare_cycles (cycle_string_first, cycle_string_second):
 
 
 def hull_test (seed):
+    global qhull_time_, chull_time_
     seeding_argument = 't' + str(seed)
     print "seed was", seeding_argument
-    rbox_process = Popen (['rbox', '64', 'D2', seeding_argument], stdout = PIPE, shell = True)
+    # rbox_process = Popen (['rbox', '1024', 'D2', seeding_argument], stdout = PIPE, shell = True)
+    rbox_process = Popen ([normal_rbox_app_, '1024', 'D2', seeding_argument], stdout = PIPE, shell = True)
     problem = rbox_process.communicate ()
     # print "==========\n", problem[0], "==========\n"
 
+    q_tic = time.clock()
     qh = subprocess.Popen(['qhull', 'p'], stdout=PIPE, stdin=PIPE, stderr=STDOUT, shell = True)
     qhull_output = qh.communicate (input=problem[0])[0]
+    q_toc = time.clock()
+    qhull_time_ += q_toc - q_tic
     # print "Qhull Result:\n", qhull_output
-
+    
+    c_tic = time.clock()
     ch = subprocess.Popen([convex_hull_app_, 'p'], stdout=PIPE, stdin=PIPE, stderr=STDOUT, shell = True)
     convex_hull_output = ch.communicate (input=problem[0])[0]
+    c_toc = time.clock()
+    chull_time_ += c_toc - c_tic
     # print "Our Result:\n", convex_hull_output
 
     if (compare_cycles (qhull_output, convex_hull_output)):
@@ -105,6 +119,8 @@ def testing ():
         print "*** TEST", x, "**********"
         if not hull_test (random_seeds[x]):
             break
+    print "qhull impl running time", qhull_time_ / 10.0
+    print "c_hull impl running time", chull_time_ / 10.0
         #check_enet (random_seeds[x])
 
 

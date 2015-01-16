@@ -1,4 +1,5 @@
 set (current_project "convex_hull")
+set (rbox_project "normal_rbox")
 project ("${current_project}")
 cmake_minimum_required(VERSION 2.8)
 
@@ -26,11 +27,12 @@ include_directories (${MCBSP_INCDIR}
                      ${FreeImage_INCLUDE_DIRS}
                     )
 
-file (GLOB source ${PROJECT_SOURCE_DIR}/src/*.cpp)
-
 add_executable (${current_project}
                 "${common_directory}/bspedupack.c"
-                ${source}
+                "${PROJECT_SOURCE_DIR}/src/convex_hull.cpp"
+               )
+add_executable (${rbox_project}
+                "${PROJECT_SOURCE_DIR}/src/normal_rbox.cpp"
                )
 target_link_libraries (${current_project}
                        "${MCBSP_LIBDIR}/libmcbsp1.2.0.a"
