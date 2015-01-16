@@ -173,9 +173,11 @@ std::pair<Point2D, Point2D> generate_line_prev (const vector<Point2D>::const_ite
 std::pair<Point2D, Point2D> generate_line_next (const vector<Point2D>::const_iterator& bucket,
                                                 const vector<Point2D>& splitters);
 
-// function picks one inside point, which are located furherest from hull points
+// function picks one inside point,
+// which is located furtherest from hull points (if prioritization is true)
 Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
-                                            const vector<Point2D>& hull);
+                                            const vector<Point2D>& hull,
+                                            bool prioritized = false);
 
 const int PROCESSORS_AMOUNT_ = 4;
 const int LEAD_PROCESSOR_ID_ = 0;
@@ -353,8 +355,8 @@ bool is_point_inside_triangle (const Point2D& p,
 }
 
 double dist (const Point2D& first, const Point2D& second) {
-    return std::pow (first.x - second.x, 2) +
-           std::pow (first.y - second.y, 2);
+    return std::pow (first.x - second.x, 2.0) +
+           std::pow (first.y - second.y, 2.0);
 }
 
 
@@ -387,8 +389,8 @@ bool is_point_inside_polygon (const vector<Point2D>& polygon,
 
 
 Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
-                                            const vector<Point2D>& hull) {
-#error make prioritization optional
+                                            const vector<Point2D>& hull,
+                                            bool prioritized) {
     std::set<Point2D, compare_points_closer_to_leftmost> hull_set;
     std::copy (hull.cbegin (), hull.cend (), std::inserter (hull_set, hull_set.end ()));
 
@@ -404,12 +406,7 @@ Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
         for (auto h : hull)
         {   cumulative_dst_to_hull += dist (p, h);
         }
-        std::pair<Point2D, double> pair;
-        pair.first = p;
-        pair.second = cumulative_dst_to_hull;
-        LOG_LEAD ("dst" << cumulative_dst_to_hull);
-        // std::make_pair<Point2D, double> (p, cumulative_dst_to_hull);
-        return pair;
+        return std::make_pair (p, cumulative_dst_to_hull);
     };
 
     std::priority_queue<std::pair<Point2D, double>, std::vector<std::pair<Point2D, double>>, compare_points_less_penalty> pq;
@@ -418,15 +415,18 @@ Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
          p != points.cend (); ++p)
     {   if (hull_set.end () == hull_set.find (*p) &&
             is_point_inside_polygon (hull, *p))
-        {   pq.emplace (generatePair (*p));
+        {   if (prioritized)
+            {   pq.emplace (generatePair (*p));
+            } else
+            {   return p;
+            }
         }
     }
 
     if (pq.empty ())
     {   return points.cend ();
     } else
-    {   LOG_LEAD ("picked one with " << pq.top ().second);
-        return std::find (points.cbegin (), points.cend (), pq.top ().first);
+    {   return std::find (points.cbegin (), points.cend (), pq.top ().first);
     }
 }
 
@@ -988,7 +988,7 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
     // procedure from CS431, pp. 125
     if (LEAD_PROCESSOR_ID_ == id_)
     {   vector<Point2D> hull = graham_scan (points);
-        auto interior_point_iter = find_interior_point (points, hull);
+        auto interior_point_iter = find_interior_point (whole_pointset_, hull, true);
         if (interior_point_iter == points.cend ())
         {   LOG_LEAD ("No interior point");
             exit (1);
@@ -998,7 +998,7 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
         draw_hull ("hull_from_samples.png", whole_pointset_, hull, interior_point_);
 
         // traverse triangles
-        vector<Point2D> points_left = find_interior_points (points, hull, interior_point_);
+        vector<Point2D> points_left = find_interior_points (whole_pointset_, hull, interior_point_);
         vector<std::pair<Point2D, Point2D>> lines;
         vector<triangle> triangles;
         for (auto hull_edge_start = hull.begin ();
