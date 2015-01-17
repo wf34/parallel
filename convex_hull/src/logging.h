@@ -19,12 +19,14 @@ public:
     };
 
     Logger ()
-        : mode_ (DEV_LEAD_ONLY | DEV_ALL)
-    {   stream.open("log.txt", std::ios::app);
+        : mode_ (SUPPRESS) // (DEV_LEAD_ONLY | DEV_ALL)
+    {   if (!(mode_ & SUPPRESS))
+        {   stream.open("log.txt", std::ios::app);
+        }
     }
 
     std::ostream& get_stream()
-    {   return std::cout; // stream; // 
+    {   return stream; //std::cout; //  
     }
 
     bool is_allowed (LoggingMode mode)

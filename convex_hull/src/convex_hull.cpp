@@ -26,7 +26,8 @@ using std::vector;
 
 
 struct Point2D {
-    Point2D ();Point2D (double x, double y);
+    Point2D ();
+    Point2D (double x, double y);
     bool operator < (const Point2D& b) const;
     bool operator == (const Point2D& b) const;
     bool operator != (const Point2D& b) const;
@@ -276,10 +277,10 @@ vector<Point2D> graham_scan (vector<Point2D> points) {
     auto bottommost_element = std::min_element (points.cbegin(), points.cend (),
                                                 compare_points_closer_to_leftmost ());
     vector<Point2D>::iterator bottommost = points.begin ();
-    std::advance (bottommost, std::distance<vector<Point2D>::const_iterator> (bottommost, bottommost_element));
-
+    std::advance (bottommost,
+                  std::distance<vector<Point2D>::const_iterator> (bottommost,
+                                                                  bottommost_element));
     std::iter_swap (points.begin (), bottommost);
-
     std::sort (points.begin () + 1, points.end (),
                compare_points_polar_angle_bigger (*points.begin ()));
 
@@ -297,18 +298,17 @@ vector<Point2D> graham_scan (vector<Point2D> points) {
             {   ++i;
             }
         }
-
         hull.emplace_back (points.at (i));
         ++i;
     }
-
-
     return hull;
 }
 
 
 
-orientation_status orientation (const Point2D& p, const Point2D& q, const Point2D& r) {
+orientation_status orientation (const Point2D& p,
+                                const Point2D& q,
+                                const Point2D& r) {
     double val = (q.x - p.x) * (r.y - p.y) -
         (r.x - p.x) * (q.y - p.y);
 
@@ -392,7 +392,8 @@ Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
                                             const vector<Point2D>& hull,
                                             bool prioritized) {
     std::set<Point2D, compare_points_closer_to_leftmost> hull_set;
-    std::copy (hull.cbegin (), hull.cend (), std::inserter (hull_set, hull_set.end ()));
+    std::copy (hull.cbegin (), hull.cend (),
+               std::inserter (hull_set, hull_set.end ()));
 
     struct compare_points_less_penalty {
         bool operator () (const std::pair<Point2D, double>& first_point,
@@ -409,7 +410,9 @@ Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
         return std::make_pair (p, cumulative_dst_to_hull);
     };
 
-    std::priority_queue<std::pair<Point2D, double>, std::vector<std::pair<Point2D, double>>, compare_points_less_penalty> pq;
+    std::priority_queue<std::pair<Point2D, double>,
+                        std::vector<std::pair<Point2D, double>>,
+                        compare_points_less_penalty> pq;
 
     for (auto p = points.cbegin ();
          p != points.cend (); ++p)
@@ -439,7 +442,9 @@ vector<Point2D> find_interior_points (vector<Point2D> points,
     Point2D_const_iterator current_interior_point;
     {   current_interior_point = find_interior_point (points, hull);
         interior_points.emplace_back (*current_interior_point);
-        points.erase (current_interior_point);
+        points.erase (points.begin () +
+            std::distance<Point2D_const_iterator> (points.cbegin (),
+                                                   current_interior_point));
     } while (current_interior_point != points.cend ())
     return interior_points;
 }
@@ -821,8 +826,10 @@ void parallel_2d_hull::compute_hull () {
     // {   convex_hull = splitters_;
     // }
     bsp_sync ();
+    LOG_LEAD ("bucket distribution started");
     distribute_over_buckets ();
     // simplified routine
+    LOG_LEAD ("bucket distribution done");
     accumulate_buckets ();
 }
 
@@ -920,7 +927,7 @@ void parallel_2d_hull::collect_all_samples (const vector<Point2D>& local_samples
 vector<triangle> merge_light_triangles (const vector<triangle>& triangles,
                                         double heaviness_threshold)
 {
-#pragma message ("maybe buggish implementation, investigate later")
+// #pragma message ("maybe buggish implementation, investigate later")
     vector<triangle> triangles_n_bins;
     triangle current_bin;
     for (const triangle& tri : triangles)
@@ -1048,7 +1055,6 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
         splitters_.resize (2 * processors_amount_, {-1,-1});
         draw_enet_computation ("tri.png", lines, whole_pointset_, interior_point_);
         // draw_subset ("enet.png", whole_pointset_, splitters_);
-        LOG_LEAD ("enet size " << splitters_.size ());
     }
     bsp_sync ();
     communicate_interior_point ();
@@ -1064,7 +1070,10 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
     }
     bsp_sync ();
     bsp_pop_reg (splitters_.data ());
-    splitters_.erase (std::remove_if (splitters_.begin (), splitters_.end (), is_point_invalid), splitters_.end ());
+    splitters_.erase (std::remove_if (splitters_.begin (),
+                                      splitters_.end (),
+                                      is_point_invalid),
+                      splitters_.end ());
     LOG_ALL ("Splitters instance size is " << splitters_.size ());
     bsp_sync ();
 }
@@ -1079,15 +1088,15 @@ void parallel_2d_hull::distribute_over_buckets () {
     // iterate over local hull and send every point to the appropriate bucket
     vector<vector <Point2D>> bucket_entries;
     bucket_entries.resize (buckets_per_proc_ *
-                                              processors_amount_);
+                           processors_amount_);
     for (const Point2D& local_hull_point : local_hull_)
     {   for (auto bucket_iter = splitters_.cbegin();
              bucket_iter != splitters_.cend ();
              ++bucket_iter)
         {   if (does_point_fall_into_bucket (local_hull_point, bucket_iter))
             {   int bucket_index =
-                    std::distance<std::vector<Point2D>::const_iterator> (splitters_.cbegin (),
-                                                                         bucket_iter);
+                    std::distance<Point2D_const_iterator> (splitters_.cbegin (),
+                                                           bucket_iter);
                 bucket_entries.at (bucket_index).emplace_back (local_hull_point);
                 break;
             }
@@ -1208,7 +1217,8 @@ void parallel_2d_hull::accumulate_buckets () {
     {   buckets_.resize (bucket_0.size () *
                          processors_amount_ *
                          buckets_per_proc_ *
-                         sizeof (Point2D));
+                         sizeof (Point2D),
+                         {-1, -1});
         for (int i = 0; i < processors_amount_; ++i)
         {   bsp_get (i,
                      bucket_0.data (),
@@ -1227,10 +1237,17 @@ void parallel_2d_hull::accumulate_buckets () {
     bsp_pop_reg (bucket_1.data ());
     bsp_sync ();
     if (LEAD_PROCESSOR_ID_ == id_)
-    {   buckets_.erase (std::remove_if (buckets_.begin (), buckets_.end (), is_point_invalid), buckets_.end ());
-        std::copy (splitters_.cbegin (), splitters_.cend (), std::back_inserter (buckets_));
+    {   buckets_.erase (std::remove_if (buckets_.begin (),
+                                        buckets_.end (),
+                                        is_point_invalid),
+                        buckets_.end ());
+        std::copy (splitters_.cbegin (),
+                   splitters_.cend (),
+                   std::back_inserter (buckets_));
         draw_subset ("buckets.png", whole_pointset_, buckets_);
+        LOG_LEAD ("last graham_scan started " << buckets_.size ());
         convex_hull = graham_scan (buckets_);
+        LOG_LEAD ("last graham_scan done");
         draw_hull ("final_hull.png", whole_pointset_, convex_hull);
     }
     bsp_sync ();
@@ -1247,11 +1264,6 @@ void compute_2d_hull_with_bsp () {
     LOG_LEAD ("Input was distributed" << endl << "Computing ... ");
     bsp_sync ();
     computer.compute_hull ();
-    // debug request computer.print_local_set ();
-    // bsp_sync ();
-    // LOG_LEAD ("Computing ... done");
-    // bsp_sync ();
-    // computer.collect_output (convex_hull);
     bsp_sync ();
     bsp_end ();
 }
