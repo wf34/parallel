@@ -4,6 +4,7 @@
 \usepackage [inner=0.5cm,outer=0.5cm]{geometry}
 \usepackage {mathtools}
 \usepackage {subfig}
+\usepackage[section]{placeins}
 
 \topmargin=-3.5cm
 \begin {document}
@@ -12,6 +13,9 @@
 \author {Dmitri Kovalenko}
 
 \maketitle
+
+
+
 \section {Problem formulation}
     We are given set $S$ of 2D points. Goal is to construct set $CH(S)$, which is convex hull for $S$.\\
     \includegraphics [width=0.45\textwidth] {plain_points.png}
@@ -19,6 +23,8 @@
     Expected results are listed below.\\
     \includegraphics [width=0.45\textwidth] {final_hull.png}
     \includegraphics [width=0.45\textwidth] {final_hull_b.png}\\
+
+
 
 \section {Algorithm description}
     Algorithm is heavely based on the solution sketch provided on the CS341 slides.\\
@@ -40,6 +46,8 @@
         \item Output resulting hull to the standard output
     \end {enumerate}
 
+
+
 \section {Code description}
      Implementation of the algorithm stored in the "parallel" repo under "\verb|/convex_hull/src|" folder.
      \begin {itemize}
@@ -51,27 +59,35 @@
          \item Step 8,9 implemented in \verb|distribute_over_buckets|
          \item Step 10,11  implemented in \verb|accumulate_buckets|. Current version of this phase is simplified and lacks interior-edge rejection algorithm. Instead, one hull of all buckets is done on the lead processor
      \end {itemize}
+
+
+
 \section {Computation illustration}
     Section is dedicated to illustrate processing steps from above.\\
-    \begin{figure}
+    \begin{figure}[htb!]
+        \captionsetup[subfigure]{labelformat=empty}
         \centering
-        \subfloat[input]{\label{ref_label1}\includegraphics[width=0.45\textwidth]{illustration/plain_points.png}}
-        \subfloat[$\frac 1 p$-approximation of $CH(S)$, \textit{samples set}]{\label{ref_label2}\includegraphics[width=0.45\textwidth]{illustration/hull_from_samples.png}}
-    \end{figure}
-    \begin{figure}
-        \centering
+        \subfloat[input]{\label{ref_label1}
+            \includegraphics[width=0.45\textwidth]{illustration/plain_points.png}}
+        \subfloat[$\frac 1 p$-approximation of $CH(S)$, \textit{samples set}]{\label{ref_label2}
+            \includegraphics[width=0.45\textwidth]{illustration/hull_from_samples.png}}
+        \hfill
         \subfloat[Process of enet computation.]{\label{ref_label1}
             \includegraphics[width=0.45\textwidth]{illustration/tri.png}}
         \subfloat[$\frac 2 p$-net of $CH(S)$. Splitters]{\label{ref_label2}
             \includegraphics[width=0.45\textwidth]{illustration/splitters.png}}
-    \end{figure}
-    \begin{figure}
-        \centering
-        \subfloat[Example of filling a bucket]{\label{ref_label1}
+        \hfill
+        \subfloat[Example of filling a bucket (Red dots are entries of local hull fell into bucket)]{\label{ref_label1}
             \includegraphics[width=0.45\textwidth]{illustration/bucket_0.png}}
         \subfloat[Result]{\label{ref_label2}
             \includegraphics[width=0.45\textwidth]{illustration/final_hull.png}}
     \end{figure}
+
+\section {Experiments}
+
+
+
+
 \section {References}
     \begin {enumerate}
         \item A. Tiskin "Advanced Topics in Algorithms" \url{http://www2.warwick.ac.uk/fac/sci/dcs/teaching/material/cs341/ata_handout1.pdf}
