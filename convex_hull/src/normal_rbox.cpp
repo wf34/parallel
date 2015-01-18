@@ -25,7 +25,7 @@ int main (int argc, char** argv) {
     while (size > 0)
     {   double x = distribution (generator);
         double y = distribution (generator);
-        if (std::abs (x) < 0.5 && std::abs (y) < 0.5)
+        // if (std::abs (x) < 0.5 && std::abs (y) < 0.5)
         {   std::cout << x << " " << y << std::endl;
             --size;
         }

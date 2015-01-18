@@ -1244,7 +1244,7 @@ void parallel_2d_hull::accumulate_buckets () {
         std::copy (splitters_.cbegin (),
                    splitters_.cend (),
                    std::back_inserter (buckets_));
-        draw_subset ("buckets.png", whole_pointset_, buckets_);
+        // draw_subset ("buckets.png", whole_pointset_, buckets_);
         LOG_LEAD ("last graham_scan started " << buckets_.size ());
         convex_hull = graham_scan (buckets_);
         LOG_LEAD ("last graham_scan done");
@@ -1258,21 +1258,28 @@ void parallel_2d_hull::accumulate_buckets () {
 void compute_2d_hull_with_bsp () {
     bsp_begin (PROCESSORS_AMOUNT_);
     LOG_LEAD ("begin");
+    double time_start = bsp_time();
     parallel_2d_hull computer;
     computer.lead_init (points);
     computer.distribute_input ();
     LOG_LEAD ("Input was distributed" << endl << "Computing ... ");
     bsp_sync ();
     computer.compute_hull ();
+    double time_end = bsp_time();
+    if (0 == bsp_pid ())
+    {   cout << "Time = " << time_end - time_start << endl;
+    }
     bsp_sync ();
     bsp_end ();
 }
 
+
+
 int main (int argc, char ** argv) {
     points = read_points ();
-    draw_subset ("plain.points.png", points, vector<Point2D> ());
+    // draw_subset ("plain.points.png", points, vector<Point2D> ());
     bsp_init( compute_2d_hull_with_bsp, argc, argv );
     compute_2d_hull_with_bsp ();
-    write_points (convex_hull);
+    // write_points (convex_hull);
     return 0;
 }
