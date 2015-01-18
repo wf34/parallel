@@ -5,8 +5,9 @@
 \usepackage {mathtools}
 \usepackage {subfig}
 \usepackage[section]{placeins}
-
-\topmargin=-3.5cm
+\usepackage{geometry}
+\geometry{top=0.5cm,bottom=0.5cm,left=1cm,right=0.5cm,nohead,nofoot}
+% \topmargin=-3.5cm
 \begin {document}
 
 \title {BSP Parallel Computation of Convex Hull}
@@ -84,7 +85,45 @@
     \end{figure}
 
 \section {Experiments}
+    The graph of computation timings is presented below. 
+    We evaluate 3 different implementations:
+    sequential graham scan, BSP convex hull with 2 and 4 processors.\\
+    All algorithms pass autotests, which compare program output with the
+    output of the industrial-strength computational geometry library \textbf{qhull}.\\
+    Presented results may look controvesal at the first glance.
+    Further points aimed to disambiguate obtained measurements.\\
+    \begin {figure}[htb!]
+        \captionsetup[subfigure]{labelformat=empty}
+        \centering
+        \subfloat[Comparison of running times of parrallel
+                  and sequential convex hull computations]{\label{ref_label}
+            \includegraphics[width=0.45\textwidth]{ch_times.png}
+        }
+    \end {figure}
+        \begin {itemize}
+        \item  Graphs of bsp version for 4 and 2 processors show
+            growth stronger than $O(n\log(n))$ on bigger problem sizes 
+            (500K and 1M respectively). Closer look on the process 
+            during execution revealed that system approaches limit
+            of RAM and heavy swapping performed
+        \item Sequential algorithm timings are incomparable to the
+            parallel ones, because of big hidden constants
+        \item Timings of 2-processor and 4-processor version don't
+            agree with theory. There is an assumption, that 
+            issue is due to sub-optimal implementation of 
+            data exchange between processors. 4-proc version
+            requires bigger buffers, which spikes total
+            processing time.
+    \end {itemize}
+    Experiments done on the Samsung NP350 laptop with 4GB of DDR3 RAM and
+    Intel Core i3-2310 (Sandy Bridge).
 
+
+
+\section {Conclusion}
+    Even though autotests proved correct work of algoritm,
+    due to implemetation ussues theoretical bound on time complexity wasn't 
+    achieved. Correct complexity might be achieved after code optimization.
 
 
 
