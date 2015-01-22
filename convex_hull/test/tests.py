@@ -65,16 +65,16 @@ def hull_test (seed, problem_size):
     qh = subprocess.Popen([convex_hull_gs_app_],
                           stdout=PIPE, stdin=PIPE, stderr=STDOUT)
     qhull_output = qh.communicate (input=problem[0])[0]
-    print "Ch_gs Result:\n", qhull_output
+    print "Ch_gs Result:", qhull_output
     
     ch = subprocess.Popen([convex_hull_2_app_],
                           stdout=PIPE, stdin=PIPE, stderr=STDOUT)
     convex_hull_output = ch.communicate (input=problem[0])[0]
-    print "ch_2:\n", convex_hull_output
+    print "ch_2:", convex_hull_output
     ch4 = subprocess.Popen([convex_hull_4_app_],
                           stdout=PIPE, stdin=PIPE, stderr=STDOUT)
     convex_hull_output4 = ch4.communicate (input=problem[0])[0]
-    print "ch_4:\n", convex_hull_output4
+    print "ch_4:", convex_hull_output4
     # if (compare_cycles (qhull_output, convex_hull_output)):
     #     # print "test passed"
     #     return True
@@ -92,7 +92,7 @@ def is_enet_valid (set, enet):
 def testing (problem_size):
     print "for size ", problem_size
     seeds_amount = 2
-    runs_amount = 2
+    runs_amount = 10
     random_seeds = [350, 1815]
     for i in range (runs_amount - seeds_amount):
         random_seeds.append (random_seeds[-1] + random_seeds[-2])
@@ -104,9 +104,10 @@ def testing (problem_size):
 
 
 def testing_for_performance ():
-    problem_sizes = [1024, 2048, 4096, 8192, 16384, \
-                     32768, 65536, 131072, 262144, \
-                     524288, 1048576, 2097152]
+    # problem_sizes = [1024, 2048, 4096, 8192, 16384, \
+    #                  32768, 65536, 131072, 262144, \
+    #                  524288, 1048576, 2097152]
+    problem_sizes = [2097152]
     for x in problem_sizes:
         testing (x)
 
