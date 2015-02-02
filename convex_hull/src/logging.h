@@ -19,7 +19,7 @@ public:
     };
 
     Logger ()
-        : mode_ (DEV_LEAD_ONLY | DEV_ALL) //(SUPPRESS) //  
+        : mode_ (SUPPRESS) //(DEV_LEAD_ONLY | DEV_ALL) //  
     {   if (!(mode_ & SUPPRESS))
         {   stream.open("log.txt", std::ios::app);
         }

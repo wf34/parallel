@@ -22,6 +22,13 @@ normal_rbox_app_ = \
 allowed_error_ = float (1e-9)
 
 perf_data_ = "times.csv"
+perf_file_ = ""
+
+
+
+def get_time (time_msg):
+    ind = time_msg.rfind (' ')
+    return time_msg[ind + 1 :]
 
 
 
@@ -58,6 +65,7 @@ def compare_cycles (cycle_string_first, cycle_string_second):
 def hull_test (seed, \
                problem_size, \
                testing_for_performance = False) :
+    global perf_file_
     seeding_argument = 't' + str(seed)
     # print "seed was", seeding_argument
     # rbox_process = Popen (['rbox', '1024', 'D2', seeding_argument], stdout = PIPE, shell = True)
@@ -70,22 +78,27 @@ def hull_test (seed, \
     if not testing_for_performance:
         qh = subprocess.Popen(["qhull", "p"],
                               stdout=PIPE, stdin=PIPE, stderr=STDOUT)
-        qhull_output = qh.communicate (input=problem[0])[0]
-        print "Ch_gs Result:", qhull_output
+    else:
+        qh = subprocess.Popen([convex_hull_gs_app_],
+                              stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+
+    qhull_output = qh.communicate (input=problem[0])[0]
     
-    ch = subprocess.Popen([convex_hull_2_app_],
+    ch2 = subprocess.Popen([convex_hull_2_app_],
                           stdout=PIPE, stdin=PIPE, stderr=STDOUT)
-    convex_hull_output2 = ch.communicate (input=problem[0])[0]
+    convex_hull_output2 = ch2.communicate (input=problem[0])[0]
     
     ch4 = subprocess.Popen([convex_hull_4_app_],
                           stdout=PIPE, stdin=PIPE, stderr=STDOUT)
     convex_hull_output4 = ch4.communicate (input=problem[0])[0]
     
     if testing_for_performance :
-       pass 
+        perf_file_.write (get_time (qhull_output) + ',' +
+                          get_time (convex_hull_output2) + ',' +
+                          get_time (convex_hull_output4) + '\n')
     else :
-        if (compare_cycles (qhull_output, convex_hull_output4)) : #and \
-            #compare_cycles (qhull_output, convex_hull_output2)) :
+        if (compare_cycles (qhull_output, convex_hull_output4) and \
+            compare_cycles (qhull_output, convex_hull_output2)) :
             return True
         else :
             print "Test failed: " + \
@@ -107,21 +120,29 @@ def testing (problem_size):
     random_seeds = [350, 1816]
     for i in range (runs_amount - seeds_amount):
         random_seeds.append (random_seeds[-1] + random_seeds[-2])
-
+    
     for x in range (runs_amount):
-        # print "*** TEST", x, "**********"
-        if not hull_test (random_seeds[x], problem_size):
+        if not hull_test (random_seeds[x], problem_size, True):
             break
 
 
+
 def main ():
-    problem_sizes = [1024, 2048, 4096, 8192, 16384, \
+    global perf_file_
+    problem_sizes = [1024 , 2048, 4096, 8192, 16384, \
                      32768, 65536, 131072, 262144, \
                      524288] #, 1048576]#, 2097152]
-    problem_sizes = [64]
+    perf_file_ = open (perf_data_, 'w')
+    perf_file_.write ("problemSize,sequential_graham_scan," +
+                      "BSP_convex_hull_on_2_processors," +
+                      "BSP_convex_hull_on_4_processors" + "\n")
     for x in problem_sizes:
+        perf_file_.write (str (x) + ',')
         testing (x)
+    perf_file_.close ()
+
 
 
 if __name__ == "__main__":
     main ()
+

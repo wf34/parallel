@@ -9,7 +9,7 @@ else ()
     set (CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/win")
 endif ()
 
-set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++11")
+set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++11 -O2 -march=native")
 if (WIN32)
     add_definitions(-DFREEIMAGE_LIB)
 endif ()

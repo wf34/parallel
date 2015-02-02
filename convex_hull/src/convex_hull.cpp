@@ -395,10 +395,6 @@ bool is_point_inside_polygon (const vector<Point2D>& polygon,
 Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
                                             const vector<Point2D>& hull,
                                             bool prioritized) {
-    std::set<Point2D, compare_points_closer_to_leftmost> hull_set;
-    std::copy (hull.cbegin (), hull.cend (),
-               std::inserter (hull_set, hull_set.end ()));
-
     struct compare_points_less_penalty {
         bool operator () (const std::pair<Point2D, double>& first_point,
                           const std::pair<Point2D, double>& second_point)
@@ -416,11 +412,12 @@ Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
 
     for (auto p = points.cbegin ();
          p != points.cend (); ++p)
-    {   if (prioritized && is_point_inside_polygon (hull, *p))
-        {   pq.emplace (generatePair (*p));
-        } else if (hull_set.end () == hull_set.find (*p) &&
-                   is_point_inside_polygon (hull, *p))
-        {   return p;
+    {   if (is_point_inside_polygon (hull, *p))
+        {   if (prioritized)
+            {   pq.emplace (generatePair (*p));
+            } else
+            {   return p;
+            }
         }
     }
 
@@ -432,10 +429,17 @@ Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
 }
 
 
+
 vector<Point2D> find_interior_points (vector<Point2D> points,
                                       const vector<Point2D>& hull,
                                       const Point2D& origin_point) {
     points.erase (std::remove (points.begin (), points.end (), origin_point));
+    for (auto hull_point: hull)
+    {   points.erase (std::remove (points.begin (),
+                                   points.end (),
+                                   hull_point));
+    }
+
     vector<Point2D> interior_points;
     Point2D_const_iterator current_interior_point;
     {   current_interior_point = find_interior_point (points, hull);
@@ -1023,7 +1027,9 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
         draw_hull ("hull_from_samples.png", whole_pointset_, hull, interior_point_);
 
         // traverse triangles
-        vector<Point2D> points_left = find_interior_points (whole_pointset_, hull, interior_point_);
+        vector<Point2D> points_left = find_interior_points (whole_pointset_,
+                                                            hull,
+                                                            interior_point_);
         vector<std::pair<Point2D, Point2D>> lines;
         vector<triangle> triangles;
         for (auto hull_edge_start = hull.begin ();
@@ -1287,9 +1293,9 @@ void compute_2d_hull_with_bsp () {
     bsp_sync ();
     computer.compute_hull ();
     double time_end = bsp_time();
-    // if (0 == bsp_pid ())
-    // {   cout << "Time = " << time_end - time_start;
-    // }
+    if (0 == bsp_pid ())
+    {   cout << "Time = " << time_end - time_start;
+    }
     bsp_sync ();
     bsp_end ();
 }
@@ -1305,6 +1311,6 @@ int main (int argc, char ** argv) {
     // draw_subset ("plain.points.png", points, vector<Point2D> ());
     bsp_init (compute_2d_hull_with_bsp, argc, argv);
     compute_2d_hull_with_bsp ();
-    write_points (convex_hull);
+    // write_points (convex_hull);
     return 0;
 }
