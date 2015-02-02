@@ -46,6 +46,9 @@ vector<Point2D> graham_scan (vector<Point2D> points);
 // triangles association (by CS341, pp.125)
 vector<Point2D> compute_enet (const vector<Point2D>& points);
 
+
+string get_app_name (const string& full_path);
+
 void draw_hull (const string& path,
                 const vector<Point2D>& points,
                 const vector<Point2D>& hull,
@@ -185,6 +188,7 @@ const int LEAD_PROCESSOR_ID_ = 0;
 
 vector<Point2D> points;
 vector<Point2D> convex_hull;
+string app_name;
 
 void compute_2d_hull_with_bsp ();
 
@@ -402,12 +406,8 @@ Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
         }
     };
 
-    auto generatePair = [hull] (const Point2D& p) -> std::pair<Point2D, double>
-    {   double cumulative_dst_to_hull = 0.0;
-        for (auto h : hull)
-        {   cumulative_dst_to_hull += dist (p, h);
-        }
-        return std::make_pair (p, cumulative_dst_to_hull);
+    auto generatePair = [] (const Point2D& p) -> std::pair<Point2D, double>
+    {   return std::make_pair (p, dist (p, {0.0, 0.0}));
     };
 
     std::priority_queue<std::pair<Point2D, double>,
@@ -416,13 +416,11 @@ Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
 
     for (auto p = points.cbegin ();
          p != points.cend (); ++p)
-    {   if (hull_set.end () == hull_set.find (*p) &&
-            is_point_inside_polygon (hull, *p))
-        {   if (prioritized)
-            {   pq.emplace (generatePair (*p));
-            } else
-            {   return p;
-            }
+    {   if (prioritized && is_point_inside_polygon (hull, *p))
+        {   pq.emplace (generatePair (*p));
+        } else if (hull_set.end () == hull_set.find (*p) &&
+                   is_point_inside_polygon (hull, *p))
+        {   return p;
         }
     }
 
@@ -474,10 +472,22 @@ void draw_line (FIBITMAP* bitmap, const Point2D& src, const Point2D& dst)
 
 
 
+string get_app_name (const string& full_path) {
+    size_t pos = full_path.rfind("/");
+    if (string::npos == pos)
+    {   return "";
+    } else
+    {   return full_path.substr (pos + 1);
+    }
+}
+
+
+
 void draw_hull (const string& path,
                 const vector<Point2D>& points,
                 const vector<Point2D>& hull,
                 const Point2D& apex) {
+    string final_path = app_name + "_" + path;
     const int width = 640;
     const int height = 480;
     
@@ -556,7 +566,7 @@ void draw_hull (const string& path,
         FreeImage_SetPixelColor (bitmap, frame_point.x, frame_point.y + 1, &green_colour);
     }
 
-    if (0 == FreeImage_Save (FIF_PNG, bitmap, path.c_str ()))
+    if (0 == FreeImage_Save (FIF_PNG, bitmap, final_path.c_str ()))
     {   cout << "Saving failed" << endl;
     }
     FreeImage_DeInitialise ();
@@ -920,6 +930,13 @@ void parallel_2d_hull::collect_all_samples (const vector<Point2D>& local_samples
 
     bsp_pop_reg (samples_set_.data ());
     bsp_sync ();
+    if (LEAD_PROCESSOR_ID_ == id_)
+    {   LOG_LEAD ("Samples: ");
+        for (auto p : samples_set_)
+        {   LOG_LEAD (p);  
+        }
+    }
+    bsp_sync ();
 }
 
 
@@ -1001,6 +1018,7 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
             exit (1);
         } else
         {   interior_point_ = *interior_point_iter;
+            LOG_LEAD ("Int point " << interior_point_);
         }
         draw_hull ("hull_from_samples.png", whole_pointset_, hull, interior_point_);
 
@@ -1053,7 +1071,10 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
         splitters_ = extract_hull_points_from_tringles (triangles_n_bins);
         draw_hull ("splitters.png", whole_pointset_, splitters_);
         splitters_.resize (2 * processors_amount_, {-1,-1});
-        draw_enet_computation ("tri.png", lines, whole_pointset_, interior_point_);
+        draw_enet_computation (app_name + "_" + "tri.png",
+                               lines,
+                               whole_pointset_,
+                               interior_point_);
         // draw_subset ("enet.png", whole_pointset_, splitters_);
     }
     bsp_sync ();
@@ -1082,10 +1103,8 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
 
 void parallel_2d_hull::distribute_over_buckets () {
     int bucket_size = subset_cardinality_ * halfplane_coefficient_;
-    bucket_0.resize (bucket_size, {-1,-1});
-    bucket_1.resize (bucket_size, {-1,-1});
-    int bucket_0_offset = 0;
-    int bucket_1_offset = 0;
+    bucket_0.resize (bucket_size * processors_amount_, {-1,-1});
+    bucket_1.resize (bucket_size * processors_amount_, {-1,-1});
 
     // iterate over local hull and send every point to the appropriate bucket
     vector<vector <Point2D>> bucket_entries;
@@ -1106,102 +1125,25 @@ void parallel_2d_hull::distribute_over_buckets () {
     }
     bsp_push_reg (bucket_0.data (), bucket_0.size () * sizeof (Point2D));
     bsp_push_reg (bucket_1.data (), bucket_1.size () * sizeof (Point2D));
-    bsp_push_reg (&bucket_0_offset, sizeof (int));
-    bsp_push_reg (&bucket_1_offset, sizeof (int));
     bsp_sync ();
-    
-    for (int i = 0; i < processors_amount_; ++i)
-    {   int points_to_offset = 0;
-        if (i == id_)
-        {   for (int bucket_index = 0;
-                 bucket_index < bucket_entries.size ();
-                 ++bucket_index)
-            {   if (bucket_entries.at (bucket_index).empty ())
-                {   continue;
-                }
-                LOG_ALL ("bucket entry #" << bucket_index
-                         << " is of size " << 
-                         bucket_entries.at (bucket_index).size ());
-                int designated_proc = bucket_index / 2;
-                void* destination = (0 == bucket_index % 2)
-                                    ? bucket_0.data ()
-                                    : bucket_1.data ();
-                void* source_offset = (0 == bucket_index % 2)
-                                      ? &bucket_0_offset
-                                      : &bucket_1_offset;
-                
-                bsp_get (designated_proc,
-                         source_offset,
-                         0,
-                         &points_to_offset,
-                         sizeof (int));
-            }
+    for (int bucket_index = 0;
+         bucket_index < bucket_entries.size ();
+         ++bucket_index)
+    {   if (bucket_entries.at (bucket_index).empty ())
+        {   continue;
         }
-        bsp_sync ();
-        if (i == id_)
-        {   for (int bucket_index = 0;
-                 bucket_index < bucket_entries.size ();
-                 ++bucket_index)
-            {   if (bucket_entries.at (bucket_index).empty ())
-                {   continue;
-                }
-                LOG_ALL ("Will be offsetting " << points_to_offset);
-                int designated_proc = bucket_index / 2;
-                void* destination = (0 == bucket_index % 2)
-                                    ? bucket_0.data ()
-                                    : bucket_1.data ();
-                void* source_offset = (0 == bucket_index % 2)
-                                      ? &bucket_0_offset
-                                      : &bucket_1_offset;
-                bsp_put (designated_proc,
-                         bucket_entries.at (bucket_index).data (),
-                         destination,
-                         points_to_offset * sizeof (Point2D),
-                         bucket_entries.at (bucket_index).size () * sizeof (Point2D));
-                points_to_offset += bucket_entries.at (bucket_index).size ();
-                LOG_ALL ("Add " << points_to_offset);
-            }
-        }
-        bsp_sync ();
-        if (i == id_)
-        {   for (int bucket_index = 0;
-                 bucket_index < bucket_entries.size ();
-                 ++bucket_index)
-            {   if (bucket_entries.at (bucket_index).empty ())
-                {   continue;
-                }
-                int designated_proc = bucket_index / 2;
-                void* destination = (0 == bucket_index % 2)
-                                    ? bucket_0.data ()
-                                    : bucket_1.data ();
-                void* source_offset = (0 == bucket_index % 2)
-                                      ? &bucket_0_offset
-                                      : &bucket_1_offset;
-                bsp_put (designated_proc,
-                         &points_to_offset,
-                         source_offset,
-                         0,
-                         sizeof (int));
-            }
-        }
-        bsp_sync ();
-        LOG_LEAD ("ONE PROC FINISHED");
-        for (int i = 0; i < processors_amount_; ++i)
-        {   if (i == id_)
-            {   LOG_ALL ("my bucket " << 2 * id_ + 0 << " offset "
-                         << bucket_0_offset);
-                LOG_ALL ("my bucket " << 2 * id_ + 1 << " offset "
-                         << bucket_1_offset);
-            }
-            bsp_sync ();
-        }
-        bsp_sync ();
+        int designated_proc = bucket_index / 2;
+        void* destination = (0 == bucket_index % 2)
+                            ? bucket_0.data ()
+                            : bucket_1.data ();
+        bsp_put (designated_proc,
+                 bucket_entries.at (bucket_index).data (),
+                 destination,
+                 bucket_size * id_,
+                 bucket_entries.at (bucket_index).size () * sizeof (Point2D));
     }
-    
     bsp_pop_reg (bucket_0.data ());
     bsp_pop_reg (bucket_1.data ());
-    bsp_pop_reg (&bucket_0_offset);
-    bsp_pop_reg (&bucket_1_offset);
     bsp_sync ();
     ///////////////
     ///////////////
@@ -1345,9 +1287,9 @@ void compute_2d_hull_with_bsp () {
     bsp_sync ();
     computer.compute_hull ();
     double time_end = bsp_time();
-    if (0 == bsp_pid ())
-    {   cout << "Time = " << time_end - time_start;
-    }
+    // if (0 == bsp_pid ())
+    // {   cout << "Time = " << time_end - time_start;
+    // }
     bsp_sync ();
     bsp_end ();
 }
@@ -1357,11 +1299,12 @@ void compute_2d_hull_with_bsp () {
 int main (int argc, char ** argv) {
     std::ios_base::sync_with_stdio (false);
     cin.tie (nullptr);
+    app_name = get_app_name (argv[0]);
 
     points = read_points ();
     // draw_subset ("plain.points.png", points, vector<Point2D> ());
-    bsp_init( compute_2d_hull_with_bsp, argc, argv );
+    bsp_init (compute_2d_hull_with_bsp, argc, argv);
     compute_2d_hull_with_bsp ();
-    // write_points (convex_hull);
+    write_points (convex_hull);
     return 0;
 }

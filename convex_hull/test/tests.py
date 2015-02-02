@@ -21,6 +21,8 @@ normal_rbox_app_ = \
         "/home/wf34/projects/parallel/convex_hull/build/normal_rbox")
 allowed_error_ = float (1e-9)
 
+perf_data_ = "times.csv"
+
 
 
 def deserialize_cycle (serialized_cycle):
@@ -53,7 +55,9 @@ def compare_cycles (cycle_string_first, cycle_string_second):
     return True
 
 
-def hull_test (seed, problem_size):
+def hull_test (seed, \
+               problem_size, \
+               testing_for_performance = False) :
     seeding_argument = 't' + str(seed)
     # print "seed was", seeding_argument
     # rbox_process = Popen (['rbox', '1024', 'D2', seeding_argument], stdout = PIPE, shell = True)
@@ -61,26 +65,33 @@ def hull_test (seed, problem_size):
                            'D2', seeding_argument], stdout = PIPE)
     problem = rbox_process.communicate ()
     # print "==========\n", problem[0], "==========\n"
-
-    qh = subprocess.Popen([convex_hull_gs_app_],
-                          stdout=PIPE, stdin=PIPE, stderr=STDOUT)
-    qhull_output = qh.communicate (input=problem[0])[0]
-    print "Ch_gs Result:", qhull_output
+    qh = None
+    qhull_output = None
+    if not testing_for_performance:
+        qh = subprocess.Popen(["qhull", "p"],
+                              stdout=PIPE, stdin=PIPE, stderr=STDOUT)
+        qhull_output = qh.communicate (input=problem[0])[0]
+        print "Ch_gs Result:", qhull_output
     
     ch = subprocess.Popen([convex_hull_2_app_],
                           stdout=PIPE, stdin=PIPE, stderr=STDOUT)
-    convex_hull_output = ch.communicate (input=problem[0])[0]
-    print "ch_2:", convex_hull_output
+    convex_hull_output2 = ch.communicate (input=problem[0])[0]
+    
     ch4 = subprocess.Popen([convex_hull_4_app_],
                           stdout=PIPE, stdin=PIPE, stderr=STDOUT)
     convex_hull_output4 = ch4.communicate (input=problem[0])[0]
-    print "ch_4:", convex_hull_output4
-    # if (compare_cycles (qhull_output, convex_hull_output)):
-    #     # print "test passed"
-    #     return True
-    # else:
-    #     print "test failed"
-    #     return False
+    
+    if testing_for_performance :
+       pass 
+    else :
+        if (compare_cycles (qhull_output, convex_hull_output4)) : #and \
+            #compare_cycles (qhull_output, convex_hull_output2)) :
+            return True
+        else :
+            print "Test failed: " + \
+                  convex_hull_output2 + \
+                  convex_hull_output4
+            return False
 
 
 def is_enet_valid (set, enet):
@@ -92,8 +103,8 @@ def is_enet_valid (set, enet):
 def testing (problem_size):
     print "for size ", problem_size
     seeds_amount = 2
-    runs_amount = 20
-    random_seeds = [350, 1815]
+    runs_amount = 5
+    random_seeds = [350, 1816]
     for i in range (runs_amount - seeds_amount):
         random_seeds.append (random_seeds[-1] + random_seeds[-2])
 
@@ -103,13 +114,14 @@ def testing (problem_size):
             break
 
 
-def testing_for_performance ():
+def main ():
     problem_sizes = [1024, 2048, 4096, 8192, 16384, \
                      32768, 65536, 131072, 262144, \
                      524288] #, 1048576]#, 2097152]
+    problem_sizes = [64]
     for x in problem_sizes:
         testing (x)
 
 
 if __name__ == "__main__":
-    testing_for_performance ()
+    main ()

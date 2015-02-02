@@ -26,7 +26,7 @@ public:
     }
 
     std::ostream& get_stream()
-    {   return std::cout; //stream; //  
+    {   return stream; //std::cout; //  
     }
 
     bool is_allowed (LoggingMode mode)
