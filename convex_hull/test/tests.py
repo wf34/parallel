@@ -92,7 +92,7 @@ def is_enet_valid (set, enet):
 def testing (problem_size):
     print "for size ", problem_size
     seeds_amount = 2
-    runs_amount = 10
+    runs_amount = 20
     random_seeds = [350, 1815]
     for i in range (runs_amount - seeds_amount):
         random_seeds.append (random_seeds[-1] + random_seeds[-2])
@@ -104,10 +104,9 @@ def testing (problem_size):
 
 
 def testing_for_performance ():
-    # problem_sizes = [1024, 2048, 4096, 8192, 16384, \
-    #                  32768, 65536, 131072, 262144, \
-    #                  524288, 1048576, 2097152]
-    problem_sizes = [2097152]
+    problem_sizes = [1024, 2048, 4096, 8192, 16384, \
+                     32768, 65536, 131072, 262144, \
+                     524288] #, 1048576]#, 2097152]
     for x in problem_sizes:
         testing (x)
 
