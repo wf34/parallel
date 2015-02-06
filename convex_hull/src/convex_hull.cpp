@@ -788,7 +788,6 @@ void parallel_2d_hull::lead_init (const vector<Point2D>& points) {
         {   bsp_put (i, &subset_cardinality_, &subset_cardinality_, 0, sizeof (int));
         }
     }
-    bsp_sync ();
     bsp_pop_reg (&subset_cardinality_);
     bsp_sync ();
 }
@@ -801,12 +800,10 @@ void parallel_2d_hull::distribute_input () {
     processors_amount_ = bsp_nprocs ();
     LOG_ALL ("subset_cardinality_ is " << subset_cardinality_);
     local_subset_.resize (subset_cardinality_);
-    bsp_sync();
     // required for successful read
     if (LEAD_PROCESSOR_ID_ != id_)
     {   whole_pointset_.resize (subset_cardinality_ * processors_amount_);
     }
-    bsp_sync();
     bsp_push_reg (whole_pointset_.data (),
                   whole_pointset_.size () * sizeof (Point2D));
 
@@ -817,7 +814,6 @@ void parallel_2d_hull::distribute_input () {
              local_subset_.data (),
              subset_cardinality_ * sizeof (Point2D));
 
-    bsp_sync ();
     bsp_pop_reg (whole_pointset_.data ());
     bsp_sync ();
 }
@@ -826,22 +822,17 @@ void parallel_2d_hull::distribute_input () {
 
 void parallel_2d_hull::compute_hull () {
     LOG_LEAD ("Computing samples...");
-    bsp_sync ();
     vector<Point2D> local_samples = compute_local_samples ();
-    bsp_sync ();
+
     LOG_LEAD ("Samples computed locally");
-    bsp_sync ();
     collect_all_samples (local_samples);
-    bsp_sync ();
+
     LOG_LEAD ("Samples collected");
     compute_enet (samples_set_);
-    // bsp_sync ();
-    // if (LEAD_PROCESSOR_ID_ == id_)
-    // {   convex_hull = splitters_;
-    // }
-    bsp_sync ();
+
     LOG_LEAD ("bucket distribution started");
     distribute_over_buckets ();
+
     // simplified routine
     LOG_LEAD ("bucket distribution done");
     accumulate_buckets ();
@@ -893,9 +884,6 @@ void parallel_2d_hull::print_local_set (const vector<Point2D>& data)
 
 vector<Point2D> parallel_2d_hull::compute_local_samples () {
     local_hull_ = graham_scan (local_subset_);
-    bsp_sync ();
-    LOG_LEAD ("Graham scan done");
-    bsp_sync ();
     if (local_hull_.size () <= processors_amount_)
     {   assert (local_hull_.size () == processors_amount_);
         // not implemented case when local_hull.size () < p
@@ -913,6 +901,7 @@ vector<Point2D> parallel_2d_hull::compute_local_samples () {
         }
         return samples;
     }
+    bsp_sync ();
 }
 
 
@@ -930,10 +919,8 @@ void parallel_2d_hull::collect_all_samples (const vector<Point2D>& local_samples
              samples_set_.data (),
              id_ * local_samples.size () * sizeof (Point2D),
              local_samples.size () * sizeof (Point2D));
-    bsp_sync ();
 
     bsp_pop_reg (samples_set_.data ());
-    bsp_sync ();
     if (LEAD_PROCESSOR_ID_ == id_)
     {   LOG_LEAD ("Samples: ");
         for (auto p : samples_set_)
@@ -1002,7 +989,6 @@ void parallel_2d_hull::communicate_interior_point () {
                  &interior_point_,
                  sizeof (Point2D));
     }
-    bsp_sync ();
     bsp_pop_reg (&interior_point_);
     bsp_sync ();
 }
@@ -1010,7 +996,6 @@ void parallel_2d_hull::communicate_interior_point () {
 
 
 void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
-    bsp_sync ();
     splitters_.resize (2 * processors_amount_);
     // local computation on lead processor,
     // procedure from CS431, pp. 125
@@ -1083,9 +1068,9 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
                                interior_point_);
         // draw_subset ("enet.png", whole_pointset_, splitters_);
     }
-    bsp_sync ();
-    communicate_interior_point ();
+    
     // communicate splitters
+    splitters_.resize (2 * processors_amount_, {-1,-1});
     bsp_push_reg (splitters_.data (), 2 * processors_amount_ * sizeof (Point2D));
     bsp_sync ();
     if (LEAD_PROCESSOR_ID_ != id_)
@@ -1095,13 +1080,14 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
                  splitters_.data (),
                  2 * processors_amount_ * sizeof (Point2D));
     }
-    bsp_sync ();
     bsp_pop_reg (splitters_.data ());
     splitters_.erase (std::remove_if (splitters_.begin (),
                                       splitters_.end (),
                                       is_point_invalid),
                       splitters_.end ());
-    LOG_ALL ("Splitters instance size is " << splitters_.size ());
+    bsp_sync ();
+
+    communicate_interior_point ();
     bsp_sync ();
 }
 
@@ -1109,6 +1095,7 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
 
 void parallel_2d_hull::distribute_over_buckets () {
     int bucket_size = subset_cardinality_ * halfplane_coefficient_;
+    LOG_LEAD ("Bucket size" << bucket_size);
     bucket_0.resize (bucket_size * processors_amount_, {-1,-1});
     bucket_1.resize (bucket_size * processors_amount_, {-1,-1});
 
@@ -1150,12 +1137,13 @@ void parallel_2d_hull::distribute_over_buckets () {
     }
     bsp_pop_reg (bucket_0.data ());
     bsp_pop_reg (bucket_1.data ());
+    ///////////////
+    ///////////////
+    bucket_0.erase (std::remove_if (bucket_0.begin (), bucket_0.end (), is_point_invalid), bucket_0.end ());
+     bucket_1.erase (std::remove_if (bucket_1.begin (), bucket_1.end (), is_point_invalid), bucket_1.end ());
+    assert (bucket_0.size () <= subset_cardinality_ ||
+            bucket_1.size () <= subset_cardinality_);
     bsp_sync ();
-    ///////////////
-    ///////////////
-    // bucket_0.erase (std::remove_if (bucket_0.begin (), bucket_0.end (), is_point_invalid), bucket_0.end ());
-    // bucket_1.erase (std::remove_if (bucket_1.begin (), bucket_1.end (), is_point_invalid), bucket_1.end ());
-    // bsp_sync ();
     ///////////////
     //bsp_push_reg (whole_pointset_.data (), whole_pointset_.size () * sizeof (Point2D));
     // bsp_sync ();
@@ -1236,16 +1224,18 @@ bool parallel_2d_hull::does_point_fall_into_bucket (const Point2D& point,
 
 
 void parallel_2d_hull::accumulate_buckets () {
-    int bucket_size = bucket_0.size ();
+    int bucket_size = subset_cardinality_;
     bsp_push_reg (bucket_0.data (), bucket_size * sizeof (Point2D));
     bsp_push_reg (bucket_1.data (), bucket_size * sizeof (Point2D));
     bsp_sync ();
     if (LEAD_PROCESSOR_ID_ == id_)
-    {   buckets_.resize (bucket_0.size () *
+    {   buckets_.resize (bucket_size *
                          processors_amount_ *
                          buckets_per_proc_ *
                          sizeof (Point2D),
                          {-1, -1});
+        LOG_LEAD ("Aggregator buffer size " << buckets_.size () <<
+                  " while bucket_0 size is "  << bucket_size);
         for (int i = 0; i < processors_amount_; ++i)
         {   bsp_get (i,
                      bucket_0.data (),
@@ -1259,7 +1249,6 @@ void parallel_2d_hull::accumulate_buckets () {
                 bucket_size * sizeof (Point2D));
         }
     }
-    bsp_sync ();
     bsp_pop_reg (bucket_0.data ());
     bsp_pop_reg (bucket_1.data ());
     bsp_sync ();
@@ -1290,13 +1279,11 @@ void compute_2d_hull_with_bsp () {
     computer.lead_init (points);
     computer.distribute_input ();
     LOG_LEAD ("Input was distributed" << endl << "Computing ... ");
-    bsp_sync ();
     computer.compute_hull ();
     double time_end = bsp_time();
     if (0 == bsp_pid ())
     {   cout << "Time = " << time_end - time_start;
     }
-    bsp_sync ();
     bsp_end ();
 }
 
