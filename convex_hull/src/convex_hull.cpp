@@ -139,7 +139,8 @@ private:
     void distribute_over_buckets ();
     bool does_point_fall_into_bucket (const Point2D& point,
                                       vector<Point2D>::const_iterator bucket);
-    void accumulate_buckets ();
+    void compute_bucket_hulls ();
+    void accumulate_bucket_hulls ();
 
     int id_;
     int processors_amount_;
@@ -158,8 +159,8 @@ private:
     // required for checking bucket residence
     Point2D interior_point_;
 
-    vector <Point2D> bucket_0;
-    vector <Point2D> bucket_1;
+    vector <Point2D> bucket_0_;
+    vector <Point2D> bucket_1_;
 };
 
 struct triangle {
@@ -278,6 +279,10 @@ void write_points (const vector<Point2D>& points, std::ostream& stream) {
 
 
 vector<Point2D> graham_scan (vector<Point2D> points) {
+    if (points.size () < 4)
+    {    return points;
+    }
+
     auto bottommost_element = std::min_element (points.cbegin(), points.cend (),
                                                 compare_points_closer_to_leftmost ());
     vector<Point2D>::iterator bottommost = points.begin ();
@@ -833,9 +838,11 @@ void parallel_2d_hull::compute_hull () {
     LOG_LEAD ("bucket distribution started");
     distribute_over_buckets ();
 
-    // simplified routine
     LOG_LEAD ("bucket distribution done");
-    accumulate_buckets ();
+    compute_bucket_hulls ();
+
+    LOG_LEAD ("Final hull comp");
+    accumulate_bucket_hulls ();
 }
 
 
@@ -921,6 +928,7 @@ void parallel_2d_hull::collect_all_samples (const vector<Point2D>& local_samples
              local_samples.size () * sizeof (Point2D));
 
     bsp_pop_reg (samples_set_.data ());
+    bsp_sync ();
     if (LEAD_PROCESSOR_ID_ == id_)
     {   LOG_LEAD ("Samples: ");
         for (auto p : samples_set_)
@@ -1096,8 +1104,8 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
 void parallel_2d_hull::distribute_over_buckets () {
     int bucket_size = subset_cardinality_ * halfplane_coefficient_;
     LOG_LEAD ("Bucket size" << bucket_size);
-    bucket_0.resize (bucket_size * processors_amount_, {-1,-1});
-    bucket_1.resize (bucket_size * processors_amount_, {-1,-1});
+    bucket_0_.resize (bucket_size * processors_amount_, {-1,-1});
+    bucket_1_.resize (bucket_size * processors_amount_, {-1,-1});
 
     // iterate over local hull and send every point to the appropriate bucket
     vector<vector <Point2D>> bucket_entries;
@@ -1116,8 +1124,8 @@ void parallel_2d_hull::distribute_over_buckets () {
             }
         }
     }
-    bsp_push_reg (bucket_0.data (), bucket_0.size () * sizeof (Point2D));
-    bsp_push_reg (bucket_1.data (), bucket_1.size () * sizeof (Point2D));
+    bsp_push_reg (bucket_0_.data (), bucket_0_.size () * sizeof (Point2D));
+    bsp_push_reg (bucket_1_.data (), bucket_1_.size () * sizeof (Point2D));
     bsp_sync ();
     for (int bucket_index = 0;
          bucket_index < bucket_entries.size ();
@@ -1127,22 +1135,23 @@ void parallel_2d_hull::distribute_over_buckets () {
         }
         int designated_proc = bucket_index / 2;
         void* destination = (0 == bucket_index % 2)
-                            ? bucket_0.data ()
-                            : bucket_1.data ();
+                            ? bucket_0_.data ()
+                            : bucket_1_.data ();
         bsp_put (designated_proc,
                  bucket_entries.at (bucket_index).data (),
                  destination,
                  bucket_size * id_,
                  bucket_entries.at (bucket_index).size () * sizeof (Point2D));
     }
-    bsp_pop_reg (bucket_0.data ());
-    bsp_pop_reg (bucket_1.data ());
+    bsp_pop_reg (bucket_0_.data ());
+    bsp_pop_reg (bucket_1_.data ());
+    bsp_sync ();
     ///////////////
     ///////////////
-    bucket_0.erase (std::remove_if (bucket_0.begin (), bucket_0.end (), is_point_invalid), bucket_0.end ());
-     bucket_1.erase (std::remove_if (bucket_1.begin (), bucket_1.end (), is_point_invalid), bucket_1.end ());
-    assert (bucket_0.size () <= subset_cardinality_ ||
-            bucket_1.size () <= subset_cardinality_);
+    bucket_0_.erase (std::remove_if (bucket_0_.begin (), bucket_0_.end (), is_point_invalid), bucket_0_.end ());
+     bucket_1_.erase (std::remove_if (bucket_1_.begin (), bucket_1_.end (), is_point_invalid), bucket_1_.end ());
+    assert (bucket_0_.size () <= subset_cardinality_ ||
+            bucket_1_.size () <= subset_cardinality_);
     bsp_sync ();
     ///////////////
     //bsp_push_reg (whole_pointset_.data (), whole_pointset_.size () * sizeof (Point2D));
@@ -1165,17 +1174,17 @@ void parallel_2d_hull::distribute_over_buckets () {
     //         {   vector<std::pair<Point2D, Point2D>> lines =
     //             {generate_line_prev(splitters_.cbegin (), splitters_),
     //              generate_line_next(splitters_.cbegin (), splitters_)};
-    //             draw_subset ("bucket_0.png", whole_pointset_, bucket_0,
+    //             draw_subset ("bucket_0_.png", whole_pointset_, bucket_0_,
     //                          interior_point_, lines);
     //         }
-    //         assert (bucket_0.size () <= bucket_size);
-    //         assert (bucket_1.size () <= bucket_size);
+    //         assert (bucket_0_.size () <= bucket_size);
+    //         assert (bucket_1_.size () <= bucket_size);
     //         LOG_ALL ("bucket 0");
-    //         for (auto p : bucket_0)
+    //         for (auto p : bucket_0_)
     //         {   if (!is_point_invalid (p)) LOG_ALL (p);
     //         }
     //         LOG_ALL ("bucket 1");
-    //         for (auto p : bucket_1)
+    //         for (auto p : bucket_1_)
     //         {   if (!is_point_invalid (p)) LOG_ALL (p);
     //         }
     //     }
@@ -1223,10 +1232,36 @@ bool parallel_2d_hull::does_point_fall_into_bucket (const Point2D& point,
 
 
 
-void parallel_2d_hull::accumulate_buckets () {
+void parallel_2d_hull::compute_bucket_hulls () {
+    bsp_sync ();
+    // for (int i = 0; i < processors_amount_; ++i)
+    // {   if (i == id_)
+        {   std::vector<std::vector<Point2D>*> two_buckets = {&bucket_0_, &bucket_1_};
+            LOG_ALL ("bucket 0 sizz " << bucket_0_.size ());
+            for (std::vector<Point2D>* bucket : two_buckets)
+            {   LOG_ALL ("bucket size was" << bucket->size ());
+                if (0 != bucket->size ())
+                {   *bucket = graham_scan (*bucket);
+                    LOG_ALL ("and now bucket size " << bucket->size ());
+                    if (bucket->size () < subset_cardinality_)
+                    {   bucket->resize (subset_cardinality_, {-1, -1});
+                    }
+
+                    assert (bucket->size () <= subset_cardinality_);
+                }
+            }
+        }
+        //bsp_sync ();
+    //}
+    bsp_sync ();
+}
+
+
+
+void parallel_2d_hull::accumulate_bucket_hulls () {
     int bucket_size = subset_cardinality_;
-    bsp_push_reg (bucket_0.data (), bucket_size * sizeof (Point2D));
-    bsp_push_reg (bucket_1.data (), bucket_size * sizeof (Point2D));
+    bsp_push_reg (bucket_0_.data (), bucket_size * sizeof (Point2D));
+    bsp_push_reg (bucket_1_.data (), bucket_size * sizeof (Point2D));
     bsp_sync ();
     if (LEAD_PROCESSOR_ID_ == id_)
     {   buckets_.resize (bucket_size *
@@ -1235,23 +1270,24 @@ void parallel_2d_hull::accumulate_buckets () {
                          sizeof (Point2D),
                          {-1, -1});
         LOG_LEAD ("Aggregator buffer size " << buckets_.size () <<
-                  " while bucket_0 size is "  << bucket_size);
+                  " while bucket_0_ size is "  << bucket_size);
         for (int i = 0; i < processors_amount_; ++i)
         {   bsp_get (i,
-                     bucket_0.data (),
+                     bucket_0_.data (),
                      0,
                      buckets_.data () + 2 * i * bucket_size * sizeof (Point2D),
                      bucket_size * sizeof (Point2D));
             bsp_get (i,
-                bucket_1.data (),
+                bucket_1_.data (),
                 0,
                 buckets_.data () + (2 * i + 1) * bucket_size * sizeof (Point2D),
                 bucket_size * sizeof (Point2D));
         }
     }
-    bsp_pop_reg (bucket_0.data ());
-    bsp_pop_reg (bucket_1.data ());
+    bsp_pop_reg (bucket_0_.data ());
+    bsp_pop_reg (bucket_1_.data ());
     bsp_sync ();
+
     if (LEAD_PROCESSOR_ID_ == id_)
     {   buckets_.erase (std::remove_if (buckets_.begin (),
                                         buckets_.end (),
