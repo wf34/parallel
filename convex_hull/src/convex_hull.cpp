@@ -154,7 +154,7 @@ private:
     vector <Point2D> samples_set_; // exists only on LEAD
     vector <Point2D> splitters_;
 
-    vector <Point2D> buckets_; // exists only on LEAD
+    vector <Point2D> bucket_hulls_; // exists only on LEAD
 
     // required for checking bucket residence
     Point2D interior_point_;
@@ -1017,7 +1017,7 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
         {   interior_point_ = *interior_point_iter;
             LOG_LEAD ("Int point " << interior_point_);
         }
-        draw_hull ("hull_from_samples.png", whole_pointset_, hull, interior_point_);
+        //draw_hull ("hull_from_samples.png", whole_pointset_, hull, interior_point_);
 
         // traverse triangles
         vector<Point2D> points_left = find_interior_points (whole_pointset_,
@@ -1068,12 +1068,12 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
         /////
 
         splitters_ = extract_hull_points_from_tringles (triangles_n_bins);
-        draw_hull ("splitters.png", whole_pointset_, splitters_);
+        //draw_hull ("splitters.png", whole_pointset_, splitters_);
         splitters_.resize (2 * processors_amount_, {-1,-1});
-        draw_enet_computation (app_name + "_" + "tri.png",
-                               lines,
-                               whole_pointset_,
-                               interior_point_);
+        // draw_enet_computation (app_name + "_" + "tri.png",
+        //                        lines,
+        //                        whole_pointset_,
+        //                        interior_point_);
         // draw_subset ("enet.png", whole_pointset_, splitters_);
     }
     
@@ -1243,10 +1243,6 @@ void parallel_2d_hull::compute_bucket_hulls () {
                 if (0 != bucket->size ())
                 {   *bucket = graham_scan (*bucket);
                     LOG_ALL ("and now bucket size " << bucket->size ());
-                    if (bucket->size () < subset_cardinality_)
-                    {   bucket->resize (subset_cardinality_, {-1, -1});
-                    }
-
                     assert (bucket->size () <= subset_cardinality_);
                 }
             }
@@ -1259,48 +1255,44 @@ void parallel_2d_hull::compute_bucket_hulls () {
 
 
 void parallel_2d_hull::accumulate_bucket_hulls () {
-    int bucket_size = subset_cardinality_;
-    bsp_push_reg (bucket_0_.data (), bucket_size * sizeof (Point2D));
-    bsp_push_reg (bucket_1_.data (), bucket_size * sizeof (Point2D));
+    int accum_storage_size = subset_cardinality_ *
+                             processors_amount_ *
+                             buckets_per_proc_;
+    bucket_hulls_.resize (accum_storage_size, {-1, -1});
+    bsp_push_reg (bucket_hulls_.data (),
+                  accum_storage_size * sizeof (Point2D));
     bsp_sync ();
-    if (LEAD_PROCESSOR_ID_ == id_)
-    {   buckets_.resize (bucket_size *
-                         processors_amount_ *
-                         buckets_per_proc_ *
-                         sizeof (Point2D),
-                         {-1, -1});
-        LOG_LEAD ("Aggregator buffer size " << buckets_.size () <<
-                  " while bucket_0_ size is "  << bucket_size);
-        for (int i = 0; i < processors_amount_; ++i)
-        {   bsp_get (i,
-                     bucket_0_.data (),
-                     0,
-                     buckets_.data () + 2 * i * bucket_size * sizeof (Point2D),
-                     bucket_size * sizeof (Point2D));
-            bsp_get (i,
-                bucket_1_.data (),
-                0,
-                buckets_.data () + (2 * i + 1) * bucket_size * sizeof (Point2D),
-                bucket_size * sizeof (Point2D));
-        }
+    if (0 != bucket_0_.size ())
+    {   bsp_put (LEAD_PROCESSOR_ID_,
+                 bucket_0_.data (),
+                 bucket_hulls_.data (),
+                 2*id_ * subset_cardinality_ * sizeof (Point2D),
+                 bucket_0_.size () * sizeof (Point2D));
     }
-    bsp_pop_reg (bucket_0_.data ());
-    bsp_pop_reg (bucket_1_.data ());
+    if (0 != bucket_1_.size ())
+    {   bsp_put (LEAD_PROCESSOR_ID_,
+                 bucket_1_.data (),
+                 bucket_hulls_.data (),
+                 (2*id_ + 1) * subset_cardinality_ * sizeof (Point2D),
+                 bucket_1_.size () * sizeof (Point2D));
+    }
+    bsp_sync ();
+    bsp_pop_reg (bucket_hulls_.data ());
     bsp_sync ();
 
     if (LEAD_PROCESSOR_ID_ == id_)
-    {   buckets_.erase (std::remove_if (buckets_.begin (),
-                                        buckets_.end (),
-                                        is_point_invalid),
-                        buckets_.end ());
+    {   bucket_hulls_.erase (std::remove_if (bucket_hulls_.begin (),
+                                             bucket_hulls_.end (),
+                                             is_point_invalid),
+                             bucket_hulls_.end ());
         std::copy (splitters_.cbegin (),
                    splitters_.cend (),
-                   std::back_inserter (buckets_));
+                   std::back_inserter (bucket_hulls_));
         // draw_subset ("buckets.png", whole_pointset_, buckets_);
-        LOG_LEAD ("last graham_scan started " << buckets_.size ());
-        convex_hull = graham_scan (buckets_);
+        LOG_LEAD ("last graham_scan started " << bucket_hulls_.size ());
+        convex_hull = graham_scan (bucket_hulls_);
         LOG_LEAD ("last graham_scan done");
-        draw_hull ("final_hull.png", whole_pointset_, convex_hull);
+        //draw_hull ("final_hull.png", whole_pointset_, convex_hull);
     }
     bsp_sync ();
 }
