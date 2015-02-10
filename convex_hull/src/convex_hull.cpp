@@ -929,13 +929,13 @@ void parallel_2d_hull::collect_all_samples (const vector<Point2D>& local_samples
 
     bsp_pop_reg (samples_set_.data ());
     bsp_sync ();
-    if (LEAD_PROCESSOR_ID_ == id_)
-    {   LOG_LEAD ("Samples: ");
-        for (auto p : samples_set_)
-        {   LOG_LEAD (p);  
-        }
-    }
-    bsp_sync ();
+    // if (LEAD_PROCESSOR_ID_ == id_)
+    // {   LOG_LEAD ("Samples: ");
+    //     for (auto p : samples_set_)
+    //     {   LOG_LEAD (p);  
+    //     }
+    // }
+    // bsp_sync ();
 }
 
 
@@ -1292,7 +1292,7 @@ void parallel_2d_hull::accumulate_bucket_hulls () {
         LOG_LEAD ("last graham_scan started " << bucket_hulls_.size ());
         convex_hull = graham_scan (bucket_hulls_);
         LOG_LEAD ("last graham_scan done");
-        //draw_hull ("final_hull.png", whole_pointset_, convex_hull);
+        // draw_hull ("final_hull.png", whole_pointset_, convex_hull);
     }
     bsp_sync ();
 }
@@ -1302,11 +1302,12 @@ void parallel_2d_hull::accumulate_bucket_hulls () {
 void compute_2d_hull_with_bsp () {
     bsp_begin (PROCESSORS_AMOUNT_);
     LOG_LEAD ("begin");
-    double time_start = bsp_time();
+    
     parallel_2d_hull computer;
     computer.lead_init (points);
     computer.distribute_input ();
     LOG_LEAD ("Input was distributed" << endl << "Computing ... ");
+    double time_start = bsp_time();
     computer.compute_hull ();
     double time_end = bsp_time();
     if (0 == bsp_pid ())
