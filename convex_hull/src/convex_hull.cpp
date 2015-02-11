@@ -17,6 +17,7 @@ extern "C" {
 }
 
 #include "logging.h"
+#include "perf.h"
 
 using std::cin;
 using std::cout;
@@ -181,8 +182,7 @@ std::pair<Point2D, Point2D> generate_line_next (const vector<Point2D>::const_ite
 // function picks one inside point,
 // which is located furtherest from hull points (if prioritization is true)
 Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
-                                            const vector<Point2D>& hull,
-                                            bool prioritized = false);
+                                            const vector<Point2D>& hull);
 
 const int PROCESSORS_AMOUNT_ = 4;
 const int LEAD_PROCESSOR_ID_ = 0;
@@ -398,8 +398,7 @@ bool is_point_inside_polygon (const vector<Point2D>& polygon,
 
 
 Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
-                                            const vector<Point2D>& hull,
-                                            bool prioritized) {
+                                            const vector<Point2D>& hull) {
     struct compare_points_less_penalty {
         bool operator () (const std::pair<Point2D, double>& first_point,
                           const std::pair<Point2D, double>& second_point)
@@ -418,11 +417,7 @@ Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
     for (auto p = points.cbegin ();
          p != points.cend (); ++p)
     {   if (is_point_inside_polygon (hull, *p))
-        {   if (prioritized)
-            {   pq.emplace (generatePair (*p));
-            } else
-            {   return p;
-            }
+        {   pq.emplace (generatePair (*p));
         }
     }
 
@@ -445,15 +440,17 @@ vector<Point2D> find_interior_points (vector<Point2D> points,
                                    hull_point));
     }
 
-    vector<Point2D> interior_points;
-    Point2D_const_iterator current_interior_point;
-    {   current_interior_point = find_interior_point (points, hull);
-        interior_points.emplace_back (*current_interior_point);
-        points.erase (points.begin () +
-            std::distance<Point2D_const_iterator> (points.cbegin (),
-                                                   current_interior_point));
-    } while (current_interior_point != points.cend ())
-    return interior_points;
+    std::function <bool (Point2D&)> is_ousider =
+         [hull] (Point2D& p) -> bool
+         {   return !is_point_inside_polygon (hull, p);
+         };
+
+
+    points.erase (std::remove_if (points.begin (),
+                                  points.end (),
+                                  is_ousider),
+                  points.end());
+    return points;
 }
 
 
@@ -827,22 +824,35 @@ void parallel_2d_hull::distribute_input () {
 
 void parallel_2d_hull::compute_hull () {
     LOG_LEAD ("Computing samples...");
-    vector<Point2D> local_samples = compute_local_samples ();
+    vector<Point2D> local_samples;
+    {   Perf p ("compute_local_samples");
+        local_samples = compute_local_samples ();
+    }
 
     LOG_LEAD ("Samples computed locally");
-    collect_all_samples (local_samples);
+    {   Perf p ("collect_all_samples");
+        collect_all_samples (local_samples);
+    }
 
     LOG_LEAD ("Samples collected");
-    compute_enet (samples_set_);
+    {   Perf p ("compute_enet");
+        compute_enet (samples_set_);
+    }
 
     LOG_LEAD ("bucket distribution started");
-    distribute_over_buckets ();
+    {   Perf p ("distribute_over_buckets");
+        distribute_over_buckets ();
+    }
 
     LOG_LEAD ("bucket distribution done");
-    compute_bucket_hulls ();
+    {   Perf p ("compute_bucket_hulls");
+        compute_bucket_hulls ();
+    }
 
     LOG_LEAD ("Final hull comp");
-    accumulate_bucket_hulls ();
+    {   Perf p ("accumulate_bucket_hulls");
+        accumulate_bucket_hulls ();
+    }
 }
 
 
@@ -948,8 +958,10 @@ vector<triangle> merge_light_triangles (const vector<triangle>& triangles,
     triangle current_bin;
     for (const triangle& tri : triangles)
     {   if (current_bin.weight > heaviness_threshold)
-        {   assert (current_bin.edge.first.x != 0.0 && current_bin.edge.first.y != 0.0);
-            assert (current_bin.edge.second.x != 0.0 && current_bin.edge.second.y != 0.0);
+        {   assert (current_bin.edge.first.x != 0.0 &&
+                    current_bin.edge.first.y != 0.0);
+            assert (current_bin.edge.second.x != 0.0 &&
+                    current_bin.edge.second.y != 0.0);
             triangles_n_bins.push_back (current_bin);
             current_bin = triangle ();
         }
@@ -1009,7 +1021,7 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
     // procedure from CS431, pp. 125
     if (LEAD_PROCESSOR_ID_ == id_)
     {   vector<Point2D> hull = graham_scan (points);
-        auto interior_point_iter = find_interior_point (whole_pointset_, hull, true);
+        auto interior_point_iter = find_interior_point (whole_pointset_, hull);
         if (interior_point_iter == points.cend ())
         {   LOG_LEAD ("No interior point");
             exit (1);
@@ -1018,12 +1030,12 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
             LOG_LEAD ("Int point " << interior_point_);
         }
         //draw_hull ("hull_from_samples.png", whole_pointset_, hull, interior_point_);
-
-        // traverse triangles
+        
         vector<Point2D> points_left = find_interior_points (whole_pointset_,
                                                             hull,
                                                             interior_point_);
-        vector<std::pair<Point2D, Point2D>> lines;
+        // traverse triangles
+        //vector<std::pair<Point2D, Point2D>> lines;
         vector<triangle> triangles;
         for (auto hull_edge_start = hull.begin ();
              hull_edge_start != hull.end ();
@@ -1036,23 +1048,26 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
             tri.edge = std::make_pair (*hull_edge_start,
                                        *hull_edge_end);
 
-            lines.push_back (tri.edge);
-            lines.emplace_back (std::make_pair (*hull_edge_start,
-                                                interior_point_));
-            for (auto set_point = points_left.begin ();
-                 set_point != points_left.end ();)
-            {   if (is_point_inside_triangle (*set_point,
-                                              interior_point_,
-                                              *hull_edge_start,
-                                              *hull_edge_end))
-                {   ++tri.weight;
-                    set_point = points_left.erase (set_point);
-                } else {
-                    ++set_point;
-                }
-            }
+            // lines.push_back (tri.edge);
+            // lines.emplace_back (std::make_pair (*hull_edge_start,
+            //                                    interior_point_));
+
             triangles.push_back (tri);
         }
+
+        for (auto set_point = points_left.begin ();
+                 set_point != points_left.end (); ++set_point)
+        {   for (auto tri : triangles)
+            {   if (is_point_inside_triangle (*set_point,
+                                              interior_point_,
+                                              tri.edge.first,
+                                              tri.edge.second))
+                {   ++tri.weight;
+                    break;
+                }
+            }
+        }
+
         double heaviness_threshold = static_cast<double> (points.size ()) /
                                      static_cast<double> (processors_amount_);
         vector<triangle> triangles_n_bins = merge_light_triangles (triangles,
@@ -1225,8 +1240,10 @@ bool parallel_2d_hull::does_point_fall_into_bucket (const Point2D& point,
     auto first_line = generate_line_prev (bucket, splitters_);
     auto second_line = generate_line_next (bucket, splitters_);
 
-    bool is_in_first_halfspace = is_point_in_halfpace (point, first_line, interior_point_);
-    bool is_in_second_halfspace = is_point_in_halfpace (point, second_line, interior_point_);
+    bool is_in_first_halfspace = is_point_in_halfpace (point, first_line,
+                                                       interior_point_);
+    bool is_in_second_halfspace = is_point_in_halfpace (point, second_line,
+                                                        interior_point_);
     return is_in_first_halfspace || is_in_second_halfspace;
 }
 
