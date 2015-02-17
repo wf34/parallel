@@ -131,7 +131,7 @@ def main ():
     global perf_file_
     problem_sizes = [1024 , 2048, 4096, 8192, 16384, \
                      32768, 65536, 131072, 262144, \
-                     524288, 1048576, 2097152]
+                     524288, 1048576, 2097152, 4194304]
     perf_file_ = open (perf_data_, 'w')
     perf_file_.write ("problemSize,sequential_graham_scan," +
                       "BSP_convex_hull_on_2_processors," +

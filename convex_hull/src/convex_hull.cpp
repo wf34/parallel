@@ -184,6 +184,8 @@ std::pair<Point2D, Point2D> generate_line_next (const vector<Point2D>::const_ite
 Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
                                             const vector<Point2D>& hull);
 
+Point2D compute_centroid (const vector<Point2D>& hull);
+
 const int PROCESSORS_AMOUNT_ = 4;
 const int LEAD_PROCESSOR_ID_ = 0;
 
@@ -430,14 +432,46 @@ Point2D_const_iterator find_interior_point (const vector<Point2D>& points,
 
 
 
+Point2D compute_centroid (const vector<Point2D>& hull) {
+    double area = 0.0;
+    Point2D centroid = {0.0, 0.0};
+    for (Point2D_const_iterator it = hull.cbegin ();
+         it != hull.cend (); ++it)
+    {   Point2D_const_iterator next;
+        if (it == hull.cend () - 1)
+        {   next = it + 1;
+        } else
+        {   next = hull.cbegin ();
+        }
+        double second_term = it->x*next->y - it->y*next->x;
+        area += second_term;
+        centroid.x = (it->x + next->x) * second_term;
+        centroid.y = (it->y + next->y) * second_term;
+    }
+    area /= 2.0;
+    centroid.x /= 6.0 * area;
+    centroid.x /= 6.0 * area;
+    return centroid;
+}
+
+
+
 vector<Point2D> find_interior_points (vector<Point2D> points,
                                       const vector<Point2D>& hull,
                                       const Point2D& origin_point) {
-    points.erase (std::remove (points.begin (), points.end (), origin_point));
+    std::set<Point2D> ought_to_be_removed;
+    ought_to_be_removed.insert (origin_point);
     for (auto hull_point: hull)
-    {   points.erase (std::remove (points.begin (),
-                                   points.end (),
-                                   hull_point));
+    {   ought_to_be_removed.insert (hull_point);
+    }
+    
+    for (Point2D_iterator it = points.begin ();
+         it != points.end ();)
+    {   if (ought_to_be_removed.end () != ought_to_be_removed.find (*it))
+        {   points.erase (it);
+        } else {
+            ++it;
+        }
     }
 
     std::function <bool (Point2D&)> is_ousider =
@@ -836,7 +870,12 @@ void parallel_2d_hull::compute_hull () {
 
     LOG_LEAD ("Samples collected");
     {   Perf p ("compute_enet");
+        // double time_start = bsp_time();
         compute_enet (samples_set_);
+        // double time_end = bsp_time();
+        // if (id_ == LEAD_PROCESSOR_ID_)
+        // {   cout << "Time = " << time_end - time_start;
+        // }
     }
 
     LOG_LEAD ("bucket distribution started");
@@ -971,8 +1010,7 @@ vector<triangle> merge_light_triangles (const vector<triangle>& triangles,
         {   current_bin.edge.second = tri.edge.second;
             current_bin.weight += tri.weight;
         } else
-        {
-            current_bin = tri;
+        {   current_bin = tri;
         }
     }
     return triangles_n_bins;
@@ -1021,17 +1059,8 @@ void parallel_2d_hull::compute_enet (const vector<Point2D>& points) {
     // procedure from CS431, pp. 125
     if (LEAD_PROCESSOR_ID_ == id_)
     {   vector<Point2D> hull = graham_scan (points);
-        auto interior_point_iter = find_interior_point (whole_pointset_, hull);
-        if (interior_point_iter == points.cend ())
-        {   LOG_LEAD ("No interior point");
-            exit (1);
-        } else
-        {   interior_point_ = *interior_point_iter;
-            LOG_LEAD ("Int point " << interior_point_);
-        }
-        //draw_hull ("hull_from_samples.png", whole_pointset_, hull, interior_point_);
-        
-        vector<Point2D> points_left = find_interior_points (whole_pointset_,
+        interior_point_ = compute_centroid (hull);
+        vector<Point2D> points_left = find_interior_points (points,
                                                             hull,
                                                             interior_point_);
         // traverse triangles
